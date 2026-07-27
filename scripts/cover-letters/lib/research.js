@@ -248,7 +248,15 @@ async function research({ jobUrl, companyUrl, roleHint, appId, companyHint }) {
 
   // Extract title — try h1, then og:title, then <title>, then first markdown ##
   const h1 = (jd.html || '').match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-  if (h1) brief.job_title = h1[1].replace(/<\/?[a-z][a-z0-9]*\b[^>]*>/gi, '').trim().slice(0, 200);
+  if (h1) {
+    // Loop-until-stable strip so nested/split tag attacks like
+    // "<sc<script>ript>" fully unwind. Single-pass regex is
+    // js/incomplete-multi-character-sanitization per CodeQL.
+    let t = h1[1];
+    let prev;
+    do { prev = t; t = t.replace(/<\/?[a-z][a-z0-9]*\b[^>]*>/gi, ''); } while (t !== prev);
+    brief.job_title = t.trim().slice(0, 200);
+  }
   if (!brief.job_title) {
     const og = (jd.html || '').match(/<meta[^>]+property="og:title"[^>]+content="([^"]+)"/i);
     if (og) brief.job_title = og[1].trim().slice(0, 200);

@@ -103,7 +103,17 @@ function firecrawlFetch(urls) {
 // with nulls when an anchor is absent.
 function parseXingDetail(html) {
   const h = html || "";
-  const clean = (s) => s ? s.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#x27;/g, "'").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim() : "";
+  // Tag strip runs to a fixed point so nested/split tag attacks like
+  // "<sc<script>ript>" fully unwind. Entity decode ordering matters: &amp;
+  // MUST decode last, otherwise "&amp;#x27;" is double-unescaped to "'"
+  // (js/double-escaping). Same pattern the upstream cv-qa.mjs fix uses.
+  const clean = (s) => {
+    if (!s) return "";
+    let out = s;
+    let prev;
+    do { prev = out; out = out.replace(/<[^>]+>/g, " "); } while (out !== prev);
+    return out.replace(/&#x27;/g, "'").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+  };
   const title = clean((h.match(/data-testid="job-details-title"[\s\S]{0,400}?<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1]);
   const company = clean((h.match(/data-testid="job-details-company-info-name"[^>]*>([\s\S]*?)<\/(?:p|span|a|div)>/i) || [])[1]);
   return { title: title || null, company: company || null };
