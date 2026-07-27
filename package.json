@@ -25,10 +25,22 @@
     "pace:json": "node scripts/metrics/pace-alarm.mjs --json",
     "window": "node scripts/metrics/apply-window.mjs",
     "window:json": "node scripts/metrics/apply-window.mjs --json",
+    "caveats:scrub": "node scripts/metrics/caveats-scrub.mjs",
+    "caveats:summary": "node scripts/metrics/caveats-summary.mjs",
+    "cv:reprocess-qa": "node scripts/cv/reprocess-all-qa.mjs",
+    "test:pdf": "node scripts/test-pdf-smoke.mjs",
     "test:scripts": "node scripts/test-scripts-smoke.mjs",
+    "test:bd": "node scripts/scan/bd-bulk-scan.mjs --self-test",
     "test": "node scripts/test-scripts-smoke.mjs",
+    "system-eval": "node scripts/system-eval.mjs",
+    "system-eval:json": "node scripts/system-eval.mjs --json",
     "notion:setup": "node scripts/notion/notion-dashboard.mjs",
-    "notion:check": "node scripts/notion/notion-dashboard.mjs --check"
+    "notion:check": "node scripts/notion/notion-dashboard.mjs --check",
+    "notion:cleanup": "node scripts/notion/notion-cleanup.mjs",
+    "dedup:cross-portal": "node scripts/scan/cross-portal-dedup.mjs",
+    "wttj:refresh": "node scripts/scan/wttj-sitemap-refresh.mjs",
+    "bd:scan": "node scripts/scan/bd-bulk-scan.mjs",
+    "bd:referral": "node scripts/scan/bd-referral-scout.mjs"
   },
   "keywords": [
     "ai",
@@ -43,6 +55,6 @@
   "dependencies": {
     "dotenv": "^17.0.0",
     "js-yaml": "^4.1.1",
-    "playwright": "^1.58.1"
+    "playwright": "^1.61.1"
   }
 }

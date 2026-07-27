@@ -26,6 +26,7 @@
 import { readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import yaml from "js-yaml";
+import { funnelHeadline, scoreCalibration } from "../metrics/metrics-core.mjs";
 
 const args = process.argv.slice(2);
 const OPEN_AFTER = args.includes("--open");
@@ -39,7 +40,8 @@ function loadConfig() {
   try { return yaml.load(readFileSync(path, "utf8")) || {}; } catch { return {}; }
 }
 const CFG = loadConfig();
-const DATABASE_ID = (CFG.notion && CFG.notion.applications_database_id) || "eace68a2-e454-4a6d-ab9d-ed5dfcd65c72";
+const DATABASE_ID = (CFG.notion && CFG.notion.applications_database_id) || process.env.NOTION_DATABASE_ID;
+if (!DATABASE_ID) { console.error('No Notion database ID. Set notion.applications_database_id in config/profile.yml or NOTION_DATABASE_ID env var.'); process.exit(1); }
 
 async function queryAll(filter = null) {
   const all = [];
@@ -96,6 +98,7 @@ function extractEssentials(page) {
     fit_notes_preview: (get("Fit notes", "rich_text") || "").slice(0, 200),
     discovered_date: get("Discovered date", "date"),
     apply_date: get("Apply date", "date"),
+    response_date: get("Response date", "date"),
     recruiter_sim_verdict: get("Recruiter-sim verdict", "select"),
     resume_files: get("Resume", "files"),
     cover_letter_files: get("Cover Letter", "files"),
@@ -154,13 +157,17 @@ function summarise(rows) {
     recruiter_sim_distribution: recruiterSim,
     top_drafted: drafted,
     top_triaged_pending: triaged,
+    // Outcome metrics from the shared semantic layer (metrics-core.mjs) — the
+    // same numbers funnel-metrics.mjs reports, so dashboard and CLI agree.
+    funnel: funnelHeadline(rows),
+    calibration: scoreCalibration(rows),
   };
 }
 
 function readWrapperTrace() {
   const p = "data/wrapper-trace.log";
   if (!existsSync(p)) return { available: false, exits: [] };
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "-");
+  const today = new Date().toISOString().slice(0, 10);
   const todayShort = new Date().toLocaleDateString("en-GB").split("/").reverse().join("-");
   const lines = readFileSync(p, "utf8").split("\n").filter(Boolean);
   const exitsToday = lines
@@ -189,7 +196,7 @@ function readScanFailures() {
 
 function readPaceSummary() {
   // Run pace-alarm --json and parse the contract block; cheap (no LLM, no network).
-  const r = spawnSync("node", ["pace-alarm.mjs", "--json"], { encoding: "utf8" });
+  const r = spawnSync("node", ["scripts/metrics/pace-alarm.mjs", "--json"], { encoding: "utf8" });
   if (r.status !== 0) return null;
   try {
     // The script emits JSON then the contract block; grab the JSON object.
@@ -253,6 +260,9 @@ async function main() {
   console.log(`TIMESTAMP_UTC: ${new Date().toISOString()}`);
   console.log(`ROWS_PULLED: ${rows.length}`);
   console.log(`BY_STAGE: ${JSON.stringify(summary.by_stage)}`);
+  console.log(`RESPONSE_RATE_PCT: ${summary.funnel.response_rate_pct ?? "n/a"}`);
+  console.log(`SCREEN_RATE_PCT: ${summary.funnel.screen_rate_pct ?? "n/a"}`);
+  console.log(`CALIBRATION_VERDICT: ${summary.calibration.verdict}`);
   console.log(`TOP_DRAFTED_COUNT: ${summary.top_drafted.length}`);
   console.log(`PACE_STATUS: ${pace?.status ?? "n/a"}`);
   console.log(`STALE_PORTALS: ${failures.stale?.length ?? 0}`);
@@ -392,14 +402,25 @@ function buildHtml(s) {
   const stage3 = summary.by_stage["3. Drafted"] || 0;
   const stage4 = summary.by_stage["4. Applied"] || 0;
   const notPursuing = summary.by_stage["Not pursuing"] || 0;
+  // Outcome KPIs (metrics-core semantic layer); tolerate pre-funnel snapshots.
+  const fn = summary.funnel || {};
+  const cal = summary.calibration || {};
   $("kpis").innerHTML = [
     {label:"Total rows", value: summary.total_rows},
     {label:"Discovered", value: stage1},
     {label:"Triaged",    value: stage2},
     {label:"Drafted",    value: stage3},
-    {label:"Applied",    value: stage4},
+    {label:"Applied",    value: fn.applications_submitted ?? stage4},
+    {label:"Response rate", value: fn.response_rate_pct != null ? fn.response_rate_pct + "%" : "—",
+     title: (fn.responses ?? "?") + " responses / " + (fn.applications_submitted ?? "?") + " applications"},
+    {label:"Screen rate", value: fn.screen_rate_pct != null ? fn.screen_rate_pct + "%" : "—",
+     title: (fn.reached_first_stage_or_beyond ?? "?") + " past first stage"},
+    {label:"Score calibration", value: cal.verdict ? cal.verdict.replace("insufficient-data","low n") : "—",
+     small: true, title: cal.note || ""},
     {label:"Not pursuing", value: notPursuing},
-  ].map(k => '<div class="card"><div class="kpi">' + k.value + '<span class="label">' + k.label + '</span></div></div>').join("");
+  ].map(k => '<div class="card"' + (k.title ? ' title="' + String(k.title).replace(/"/g, "&quot;") + '"' : '') +
+    '><div class="kpi"' + (k.small ? ' style="font-size:18px;line-height:1.6"' : '') + '>' + k.value +
+    '<span class="label">' + k.label + '</span></div></div>').join("");
 
   // Stages bar
   const total = summary.total_rows || 1;

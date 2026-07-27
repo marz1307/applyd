@@ -60,7 +60,7 @@ Block G assesses whether a posting is likely a real, active opening. It does NOT
 | Apply button active | Page snapshot | High | Direct observable fact |
 | Tech specificity in JD | JD text | Medium | Generic JDs correlate with ghost postings but also with poor writing |
 | Requirements realism | JD text | Medium | Contradictions are a strong signal, vagueness is weaker |
-| Recent layoff news | WebSearch | Medium | Must consider department, timing, and company size |
+| Recent layoff news | web search | Medium | Must consider department, timing, and company size |
 | Reposting pattern | scan-history.tsv | Medium | Same role reposted 2+ times in 90 days is concerning |
 | Salary transparency | JD text | Low | Jurisdiction-dependent, many legitimate reasons to omit |
 | Role-company fit | Qualitative | Low | Subjective, use only as supporting signal |
@@ -106,7 +106,7 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 1b. **First evaluation of each session:** Run `node scripts/cv/cv-sync-check.mjs`. If warnings, notify user.
 2. Detect the role archetype and adapt framing per _profile.md
 3. Cite exact lines from CV when matching
-4. Use WebSearch for comp and company data
+4. Use web search for comp and company data
 5. Register in tracker after evaluating
 6. Generate content in the language of the JD (EN default)
 7. Be direct and actionable -- no fluff
@@ -115,18 +115,20 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 9. **Tracker additions as TSV** -- NEVER edit applications.md directly. Write TSV in `batch/tracker-additions/`.
 10. **Include `**URL:**` in every report header.**
 
-### Tools
+### Tools (capabilities the agent needs)
 
-| Tool | Use |
-|------|-----|
-| WebSearch | Comp research, trends, company culture, LinkedIn contacts, fallback for JDs |
-| WebFetch | Fallback for extracting JDs from static pages |
-| Playwright | Verify offers (browser_navigate + browser_snapshot). **NEVER 2+ agents with Playwright in parallel.** |
-| Read | cv.md, _profile.md, article-digest.md, cv-template.html |
-| Write | Temporary HTML for PDF, applications.md, reports .md |
-| Edit | Update tracker |
-| Canva MCP | Optional visual CV generation. Duplicate base design, edit text, export PDF. Requires `cv.canva_resume_design_id` in profile.yml. |
-| Bash | `node scripts/cv/generate-pdf.mjs` |
+Each row is a *capability* — use whatever your agent exposes for it. Reference bindings (Claude Code names in brackets):
+
+| Capability | Use | Reference binding |
+|------|-----|-------------------|
+| Web search | Comp research, trends, company culture, LinkedIn contacts, fallback for JDs | Claude: `WebSearch`; Gemini: built-in search; Codex: shell + curl |
+| Web fetch | Fallback for extracting JDs from static pages | Claude: `WebFetch`; Codex: shell + curl |
+| Browser automation | Verify offers (navigate + snapshot the rendered page). **NEVER 2+ agents driving a browser in parallel.** | Claude: Playwright MCP (`browser_navigate` + `browser_snapshot`); Codex: shell + playwright |
+| File read | `cv.md`, `_profile.md`, `article-digest.md`, `cv-template.html` | Claude: `Read`; Codex: `read`/`cat` |
+| File write | Temporary HTML for PDF, `applications.md`, reports `.md` | Claude: `Write`; Codex: patch |
+| File edit | Update tracker | Claude: `Edit`; Codex: patch |
+| Canva MCP | Optional visual CV generation. Duplicate base design, edit text, export PDF. Requires `cv.canva_resume_design_id` in `profile.yml`. | Any agent with MCP |
+| Shell | `node scripts/cv/generate-pdf.mjs` | Claude: `Bash`; Codex: shell |
 
 ### Time-to-offer priority
 - Working demo + metrics > perfection
@@ -226,7 +228,7 @@ These rules apply to ALL generated text that ends up in candidate-facing documen
 - "demonstrated ability to" / "best practices" (name the practice)
 
 ### Unicode normalization for ATS
-`scripts/cv/generate-pdf.mjs` automatically normalizes em-dashes, smart quotes, and zero-width characters to ASCII equivalents for maximum ATS compatibility. But avoid generating them in the first place.
+`generate-pdf.mjs` automatically normalizes em-dashes, smart quotes, and zero-width characters to ASCII equivalents for maximum ATS compatibility. But avoid generating them in the first place.
 
 ### Vary sentence structure
 - Don't start every bullet with the same verb

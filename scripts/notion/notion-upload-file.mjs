@@ -14,12 +14,12 @@
  *
  * Usage:
  *   node notion-upload-file.mjs \
- *     --file output/{CandidateName}_CV_ExampleCo_2026-05-26.pdf \
- *     --page 36a68966-61a3-818c-84cf-edf417341d90 \
+ *     --file output/Candidate_CV_Eraneos_2026-05-26.pdf \
+ *     --page <notion-page-id> \
  *     --property "Resume"
  *
  *   Optional:
- *     --name "the user_CV_ExampleCo.pdf"   # display name in Notion (defaults to basename)
+ *     --name "Candidate_CV_Eraneos.pdf"   # display name in Notion (defaults to basename)
  *     --append                          # add to existing files instead of replacing
  *     --json                            # JSON-only output for routines
  *

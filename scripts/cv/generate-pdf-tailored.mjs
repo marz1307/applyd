@@ -3,24 +3,25 @@
 /**
  * generate-pdf-tailored.mjs — Tailored CV PDF generator
  *
- * Reads cv.md, applies an archetype-driven tailoring pattern, and renders
- * to a single-column A4 PDF. Source Serif 4 body, IBM Plex Sans headings,
- * JetBrains Mono tech tags.
+ * Mirrors the canonical published CV format
+ * (cv_english.pdf / lebenslauf_deutsch.pdf): Source Serif 4 body,
+ * IBM Plex Sans headings, JetBrains Mono tech tags, orange
+ * (#D4471F) section underlines.
  *
- * Trigger:
- *   --lang en  → cv.md, English CV, no photo by default
- *   --lang <other> → cv.md, localised CV (the user must maintain a localised cv.md)
+ * Trigger (per modes/_profile.md → "CV format by JD language"):
+ *   --lang de  → cv-de.md, DE Lebenslauf, photo embedded, filename Lebenslauf_*
+ *   --lang en  → cv.md, English CV, NO photo, filename CV_*
+ *   (no --lang) → falls back to --country: DACH country → de, else en
  *
- * Overrides:
- *   --with-photo  → force photo onto a CV (some markets prefer a photo)
- *   --no-photo    → drop photo (recruiter asked)
- *   --role-title "<title>" → override the CV tagline for this render (never edits cv.md)
+ * Overrides (rare):
+ *   --with-photo  → force photo onto an EN CV (DACH recruiter asked)
+ *   --no-photo    → drop photo from a DE Lebenslauf (recruiter asked)
  *
  * Golden rule: --max-pages 2 (default). Generator exits 2 if exceeded.
  *
  * Usage:
  *   node generate-pdf-tailored.mjs \
- *     --archetype AE --company ExampleCo --country GB --lang en --date 2026-05-24
+ *     --archetype AE --company Eraneos --country DE --lang de --date 2026-05-24
  */
 
 import { readFile, writeFile, readFileSync, existsSync } from "node:fs";
@@ -29,17 +30,21 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { promisify } from "node:util";
+import { applyRoleTitle } from "./jd-role-title.mjs";
 
 const readFileAsync = promisify(readFile);
 const writeFileAsync = promisify(writeFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..');
 
-// Countries where a CV photo is a market norm. Override via --with-photo / --no-photo.
-const PHOTO_LANG_COUNTRIES = new Set();
+const DACH_COUNTRIES = new Set(["DE", "AT", "CH", "GERMANY", "AUSTRIA", "SWITZERLAND"]);
 
 // ── arg parsing ──────────────────────────────────────────────────────────
 function parseArgs(argv) {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    console.log('Usage: node generate-pdf-tailored.mjs --company <name> [--archetype AE|DS|DE|BI] [--lang en|de] [--country <ISO>] [--role-title "<JD title>"] [--keywords a,b,c] [--date YYYY-MM-DD] [--with-photo|--no-photo] [--max-pages N] [--profile-text "<text>"]');
+    process.exit(0);
+  }
   const args = {
     keywords: [],
     lang: null,
@@ -68,16 +73,17 @@ function parseArgs(argv) {
 
   // Language resolution:
   //   1. explicit --lang wins
-  //   2. fallback to en
-  if (!args.lang) args.lang = "en";
-  args.isPhotoLangCountry = PHOTO_LANG_COUNTRIES.has(args.country);
+  //   2. fallback to DACH country → de, else en
+  const isDachCountry = DACH_COUNTRIES.has(args.country);
+  if (!args.lang) args.lang = isDachCountry ? "de" : "en";
+  args.isDachCountry = isDachCountry;
 
   // Photo trigger is now JD-language-driven, not country-driven:
-  //   - DE CV → photo by default; --no-photo override drops it
+  //   - DE Lebenslauf → photo by default; --no-photo override drops it
   //   - EN CV         → no photo by default; --with-photo override adds it
   args.includePhoto = args.lang === "de" ? !args.noPhoto : args.withPhoto;
 
-  if (!args.cv) args.cv = args.lang === "de" ? "cv.md" : "cv.md";
+  if (!args.cv) args.cv = args.lang === "de" ? "cv-de.md" : "cv.md";
   if (!args.archetype) args.archetype = "AE";
   if (!args.date) args.date = new Date().toISOString().slice(0, 10);
   if (!args.company) {
@@ -178,8 +184,45 @@ function reorderSkills(skillsBlock, archetype) {
   return ordered.join("\n");
 }
 
-function reorderProjects(projectsBlock, archetype) {
-  return projectsBlock;
+// JD-driven project selection (implemented 2026-07-03 — was a no-op stub).
+// Scores every project in cv/project-pool.json against the JD keywords and
+// the archetype, pins the dissertation first, and returns the top
+// `max_projects` as a markdown block in the cv.md Projects format. The pool
+// spans the 4 CV-core projects PLUS the portfolio-only inventory from
+// article-digest.md (SQL Server schema design, R regression, clinical trials,
+// NLP sentiment, Power BI dashboard, MCP server), so a Power-BI-heavy JD gets
+// the dashboard project and an NLP JD gets the RoBERTa study. Selection
+// REPLACES, never adds — max_projects (4) protects the 2-page rule.
+// Falls back to the cv.md block untouched when the pool file is absent.
+function reorderProjects(projectsBlock, archetype, keywords = [], lang = "en") {
+  const poolPath = resolve(__dirname, "project-pool.json");
+  if (!existsSync(poolPath)) return projectsBlock;
+  let pool;
+  try { pool = JSON.parse(readFileSync(poolPath, "utf8")); }
+  catch { return projectsBlock; }
+
+  const kw = (keywords || []).map(k => String(k).toLowerCase());
+  const arch = String(archetype || "AE").toUpperCase();
+  const bodyKey = lang === "de" ? "md_de" : "md_en";
+
+  const scored = (pool.projects || [])
+    .filter(p => p[bodyKey])
+    .map(p => {
+      let s = (p.archetypes && p.archetypes[arch]) || 0;
+      for (const k of kw) {
+        if ((p.keywords || []).some(pk => k.includes(pk.trim()) || pk.trim().includes(k))) s += 2;
+      }
+      if (p.pinned) s += 100; // dissertation always leads
+      return { p, s };
+    })
+    .sort((a, b) => b.s - a.s);
+
+  const maxN = pool.max_projects || 4;
+  const picked = scored.slice(0, maxN).filter(x => x.s > 0);
+  if (!picked.length) return projectsBlock;
+
+  console.log(`🧩 Projects selected [${arch}, ${kw.length} kw]: ${picked.map(x => `${x.p.id}(${x.s})`).join(", ")}`);
+  return picked.map(x => x.p[bodyKey]).join("\n\n");
 }
 
 // ── HTML rendering ──────────────────────────────────────────────────────
@@ -245,8 +288,8 @@ function experienceBlockToHtml(md) {
 // metadata after the first ·), description paragraph, then a monospace tag run
 // at the end.
 //
-// Supports BOTH markdown formats the user uses:
-//   `### Project Title · Meta · ...`   (cv.md style)
+// Supports BOTH markdown formats:
+//   `### Project Title · Meta · ...`   (cv-de.md style)
 //   `**Project Title** · Meta · ...`   (cv.md style)
 function projectsBlockToHtml(md) {
   const out = [];
@@ -322,10 +365,9 @@ async function main() {
   console.log(`🏢 Company:   ${args.company}`);
   console.log(`📅 Date:      ${args.date}`);
   console.log(`🌐 Language:  ${args.lang}`);
-  if (args.country) console.log(`🌍 Country:   ${args.country}${args.isPhotoLangCountry ? "" : ""}`);
-  if (args.includePhoto) console.log(`📷 Photo:     embedded (35mm × 45mm photo)`);
+  if (args.country) console.log(`🌍 Country:   ${args.country}${args.isDachCountry ? " (DACH)" : ""}`);
+  if (args.includePhoto) console.log(`📷 Photo:     embedded (35mm × 45mm Bewerbungsfoto)`);
   if (args.keywords.length) console.log(`🔑 Keywords:  ${args.keywords.join(", ")}`);
-  if (args.roleTitle) console.log(`🏷  Role title override: ${args.roleTitle}`);
 
   const cvText = await readFileAsync(resolve(REPO_ROOT, args.cv), "utf8");
   const templateText = await readFileAsync(resolve(REPO_ROOT, "templates/cv-template.html"), "utf8");
@@ -334,27 +376,28 @@ async function main() {
   const sections = parseCvMd(cvText);
 
   const headerLines = sections.header.split("\n").filter(Boolean);
-  const name = headerLines[0]?.replace(/^#\s+/, "") || "the user";
 
   const profileGet = (key) => {
     const m = profileYml.match(new RegExp(`^\\s*${key}\\s*:\\s*['"]?([^'"\n]+)['"]?`, "m"));
     return m ? m[1].trim() : "";
   };
+
+  const name = headerLines[0]?.replace(/^#\s+/, "") || profileGet("full_name") || profileGet("name") || "Candidate";
   const email = profileGet("email");
   const phone = profileGet("phone");
   const location = profileGet("location");
   const linkedin = profileGet("linkedin");
   const portfolio = profileGet("portfolio_url");
-  const github = profileGet("github") || "github.com/your-username";
+  const github = profileGet("github") || "";
 
   const profileBody = args.profileText || sections.profile;
 
   const reorderedSkills = reorderSkills(sections.skills || "", args.archetype);
-  const reorderedProjects = reorderProjects(sections.projects || "", args.archetype);
+  const reorderedProjects = reorderProjects(sections.projects || "", args.archetype, args.keywords, args.lang);
 
   const labels = args.lang === "de"
     ? {
-        docLabel:        "CV",
+        docLabel:        "Lebenslauf",
         summary:         "Profil",
         competencies:    "Kernkompetenzen",
         experience:      "Berufserfahrung",
@@ -378,19 +421,26 @@ async function main() {
         personal_data:   "Personal Details",
       };
 
-  // --role-title overrides the CV tagline for this render only (never edits cv.md).
-  // Falls back to the cv.md header tagline, then a generic default.
-  const tagline = args.roleTitle || extractRoleTagline(sections.header) || "Analytics Engineer · Data Scientist";
+  // Job-title header: LEAD with the JD's verbatim advertised role (--role-title),
+  // keeping the CV's role anchor. Without --role-title the header stays generic —
+  // which violates the "tagline = JD's exact advertised role" rule, so warn loudly.
+  let tagline = extractRoleTagline(sections.header) || "Analytics Engineer · Data Scientist";
+  if (args.roleTitle) {
+    tagline = applyRoleTitle(tagline, args.roleTitle);
+    console.log(`🎯 Header role: "${tagline}" (from --role-title "${args.roleTitle}")`);
+  } else {
+    console.warn(`⚠ No --role-title passed — header stays "${tagline}" and will NOT match the JD's advertised role.`);
+  }
 
-  // ── DE CV: embed photo (base64 so HTML is self-contained) ──
+  // ── DE Lebenslauf: embed Bewerbungsfoto (base64 so HTML is self-contained) ──
   let photoBlock = "";
   if (args.includePhoto) {
-    const photoPath = resolve(REPO_ROOT, "assets", "headshot.jpg");
+    const photoPath = resolve(REPO_ROOT, "assets", "candidate-photo.jpg");
     if (existsSync(photoPath)) {
       const photoB64 = readFileSync(photoPath).toString("base64");
       photoBlock = `<div class="header-photo"><img src="data:image/jpeg;base64,${photoB64}" alt="${name}" /></div>`;
     } else {
-      console.warn(`⚠ Photo requested but assets/headshot.jpg not found — proceeding without photo`);
+      console.warn(`⚠ Photo requested but assets/candidate-photo.jpg not found — proceeding without photo`);
     }
   }
 
@@ -460,9 +510,10 @@ async function main() {
   }
 
   const slug = args.company.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const namePart = name.replace(/\s+/g, '_');
   const baseName = args.lang === "de"
-    ? `{CandidateName}_CV_${capitalise(slug)}_${args.date}`
-    : `{CandidateName}_CV_${capitalise(slug)}_${args.date}`;
+    ? `${namePart}_Lebenslauf_${capitalise(slug)}_${args.date}`
+    : `${namePart}_CV_${capitalise(slug)}_${args.date}`;
 
   const tmpHtml = `/tmp/${baseName}.html`;
   await writeFileAsync(tmpHtml, html, "utf8");
@@ -488,7 +539,7 @@ async function main() {
   if (pageCount > args.maxPages) {
     console.error("");
     console.error(`❌ GOLDEN RULE VIOLATION: ${pageCount} pages > ${args.maxPages}-page limit.`);
-    console.error("   Either trim cv.md / cv.md (drop oldest role, merge into 'Earlier Experience', cut Projects/Certifications),");
+    console.error("   Either trim cv-de.md / cv.md (drop oldest role, merge into 'Earlier Experience', cut Projects/Certifications),");
     console.error("   or pass --max-pages 3 ONLY for an explicit one-off where a recruiter asked for a longer document.");
     console.error(`   Offending file: ${outputPdf}`);
     process.exit(2);
@@ -507,7 +558,7 @@ async function main() {
     keyword_count:    args.keywords.length,
     lang:             args.lang,
     photo_embedded:   args.includePhoto,
-    is_photo_lang_country:  args.isPhotoLangCountry,
+    is_dach_country:  args.isDachCountry,
     page_count:       pageCount,
     max_pages:        args.maxPages,
   };

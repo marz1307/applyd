@@ -13,11 +13,12 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
+import { normalizeStatus, classifyLocalOutcome as classifyOutcome, LOCAL_OUTCOMES } from './metrics-core.mjs';
 
-const CAREER_OPS = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const CAREER_OPS = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
   ? join(CAREER_OPS, 'data/applications.md')
   : join(CAREER_OPS, 'applications.md');
@@ -51,34 +52,14 @@ const MIN_THRESHOLD = minThresholdIdx !== -1 && args[minThresholdIdx + 1] !== un
   ? (Number.isNaN(parseInt(args[minThresholdIdx + 1])) ? 5 : parseInt(args[minThresholdIdx + 1]))
   : 5;
 
-// --- Status normalization (mirrors verify-pipeline.mjs) ---
-const ALIASES = {
-  'evaluada': 'evaluated', 'condicional': 'evaluated', 'hold': 'evaluated',
-  'evaluar': 'evaluated', 'verificar': 'evaluated',
-  'aplicado': 'applied', 'enviada': 'applied', 'aplicada': 'applied',
-  'applied': 'applied', 'sent': 'applied',
-  'respondido': 'responded',
-  'entrevista': 'interview',
-  'oferta': 'offer',
-  'rechazado': 'rejected', 'rechazada': 'rejected',
-  'descartado': 'discarded', 'descartada': 'discarded',
-  'cerrada': 'discarded', 'cancelada': 'discarded',
-  'no aplicar': 'skip', 'no_aplicar': 'skip', 'monitor': 'skip', 'geo blocker': 'skip',
-};
-
-function normalizeStatus(raw) {
-  const clean = raw.replace(/\*\*/g, '').trim().toLowerCase()
-    .replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
-  return ALIASES[clean] || clean;
-}
-
-function classifyOutcome(status) {
-  const s = normalizeStatus(status);
-  if (['interview', 'offer', 'responded', 'applied'].includes(s)) return 'positive';
-  if (['rejected', 'discarded'].includes(s)) return 'negative';
-  if (['skip'].includes(s)) return 'self_filtered';
-  return 'pending'; // evaluated
-}
+// --- Status normalization + outcome classification -------------------------
+// Both come from metrics-core.mjs (the shared semantic layer). NOTE the
+// semantic fix that arrived with the move: a bare "applied" is now
+// `pending_response`, NOT `positive` — a submission with no employer signal
+// is not a win, and counting it as one inflated every conversion rate this
+// script reports. Buckets: positive / pending_response / negative /
+// self_filtered / pending (see LOCAL_OUTCOMES).
+const newOutcomeCounts = () => Object.fromEntries([['total', 0], ...LOCAL_OUTCOMES.map(o => [o, 0])]);
 
 function normalizeList(value) {
   if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
@@ -393,7 +374,7 @@ function analyze() {
   }
 
   // --- Score comparison by outcome ---
-  const scoresByOutcome = { positive: [], negative: [], self_filtered: [], pending: [] };
+  const scoresByOutcome = Object.fromEntries(LOCAL_OUTCOMES.map(o => [o, []]));
   for (const e of enriched) {
     if (e.score > 0) scoresByOutcome[e.outcome].push(e.score);
   }
@@ -409,18 +390,15 @@ function analyze() {
     };
   };
 
-  const scoreComparison = {
-    positive: scoreStats(scoresByOutcome.positive),
-    negative: scoreStats(scoresByOutcome.negative),
-    self_filtered: scoreStats(scoresByOutcome.self_filtered),
-    pending: scoreStats(scoresByOutcome.pending),
-  };
+  const scoreComparison = Object.fromEntries(
+    LOCAL_OUTCOMES.map(o => [o, scoreStats(scoresByOutcome[o])])
+  );
 
   // --- Archetype breakdown ---
   const archetypeMap = new Map();
   for (const e of enriched) {
     const arch = e.report?.archetype || 'Unknown';
-    if (!archetypeMap.has(arch)) archetypeMap.set(arch, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
+    if (!archetypeMap.has(arch)) archetypeMap.set(arch, newOutcomeCounts());
     const entry = archetypeMap.get(arch);
     entry.total++;
     entry[e.outcome]++;
@@ -454,7 +432,7 @@ function analyze() {
   const remoteMap = new Map();
   for (const e of enriched) {
     const policy = e.remoteBucket;
-    if (!remoteMap.has(policy)) remoteMap.set(policy, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
+    if (!remoteMap.has(policy)) remoteMap.set(policy, newOutcomeCounts());
     const entry = remoteMap.get(policy);
     entry.total++;
     entry[e.outcome]++;
@@ -469,7 +447,7 @@ function analyze() {
   const sizeMap = new Map();
   for (const e of enriched) {
     const size = e.companySize;
-    if (!sizeMap.has(size)) sizeMap.set(size, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
+    if (!sizeMap.has(size)) sizeMap.set(size, newOutcomeCounts());
     const entry = sizeMap.get(size);
     entry.total++;
     entry[e.outcome]++;

@@ -20,8 +20,8 @@ When the candidate pastes a job (text or URL), ALWAYS deliver the 7 blocks (A-F 
    The chain tries each tier in order until one succeeds:
    - **Firecrawl** (self-host or cloud) — preferred when configured. Returns clean markdown + metadata.
    - **Bright Data Web Unlocker** — used when `BRIGHTDATA_API_KEY` is set. Bypasses bot detection.
-   - **Playwright** (interactive only) — falls through with `code='agent-playwright-fallback'`; the agent then runs `browser_navigate` + `browser_snapshot` directly.
-   - **WebFetch** — last-resort no-auth fetch for headless / batch mode.
+   - **Browser automation** (interactive only) — falls through with `code='agent-playwright-fallback'`; the agent then navigates + snapshots the rendered page directly (Claude: Playwright MCP `browser_navigate` + `browser_snapshot`; other agents: their equivalent).
+   - **Plain web fetch** — last-resort no-auth fetch for headless / batch mode (Claude: `WebFetch`; Codex: shell + curl).
 
    The result shape:
    ```
@@ -68,7 +68,7 @@ This block is REQUIRED in every report. It is what later tracker hygiene checks 
 
 ### Batch / headless mode
 
-When running under `claude -p` (no Playwright), the same checks apply via WebFetch. Mark the report header `**Verification:** unconfirmed (batch mode, WebFetch only)` and run a tighter title-only match — never write a Notion row at Stage 2 or higher from batch mode if the title check fails.
+When running under a headless agent CLI (`claude -p`, `codex exec`, `gemini -p`, …) with no browser automation, the same checks apply via a plain web fetch. Mark the report header `**Verification:** unconfirmed (batch mode, web-fetch only)` and run a tighter title-only match — never write a Notion row at Stage 2 or higher from batch mode if the title check fails.
 
 ---
 
@@ -177,7 +177,7 @@ If `work_eligibility.needs_uk_sponsorship` is false (or the role isn't UK-based)
 
 ### Step 7 — Demand-trend read
 
-Use one WebSearch for the role-title + market + current year (e.g. `"Analytics Engineer" London 2026 demand`). Note: hiring freezes, layoff news, expansion announcements that affect this role.
+Use one web search for the role-title + market + current year (e.g. `"Analytics Engineer" London 2026 demand`). Note: hiring freezes, layoff news, expansion announcements that affect this role.
 
 ### Step 8 — Sources and confidence
 
@@ -243,7 +243,7 @@ Analyze the job posting for signals that indicate whether this is a real, active
 - What ratio of the JD is role-specific vs generic boilerplate?
 - Any internal contradictions? (entry-level title + staff requirements, etc.)
 
-**3. Company Hiring Signals** (2-3 WebSearch queries, combine with Block D research):
+**3. Company Hiring Signals** (2-3 web searches, combine with Block D research):
 - Search: `"{company}" layoffs {year}` -- note date, scale, departments
 - Search: `"{company}" hiring freeze {year}` -- note any announcements
 - If layoffs found: are they in the same department as this role?
@@ -348,7 +348,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 **Step 2a — Notion write (PRIMARY).**
 
 1. Run `notion-search` on the Applications DB filtered by `Job URL = {url}`. Dedup key.
-2. If a row exists → `notion-update-page`. If not → `notion-create-pages` against data source `fdc232c2-3c9b-4311-a80b-5f09698c3819`.
+2. If a row exists → `notion-update-page`. If not → `notion-create-pages` against the data source ID configured in `config/profile.yml → notion.data_source_id`.
 3. Fields to write on UPSERT:
    - `Job URL` (the canonical posting URL — required, dedup key)
    - `Company` (title)
@@ -390,7 +390,7 @@ The Recruiter-sim verdict (`INVITE` / `MAYBE` / `REJECT`) is computed by an opti
 
 **Order of operations after Block F:**
 
-1. Pass `cv.md` + the JD text + Block A's summary into the recruiter-sim command. If running interactively, invoke `/recruiter-sim`. If running in batch mode, the prompt body is the contents of `recruiter-sim.md` + the JD payload — run it through Claude with `claude -p` and capture the JSON output.
+1. Pass `cv.md` + the JD text + Block A's summary into the recruiter-sim command. If running interactively, invoke `/recruiter-sim`. If running in batch mode, the prompt body is the contents of `recruiter-sim.md` + the JD payload — run it through the local agent CLI (`claude -p`, `codex exec`, `gemini -p`, …) and capture the JSON output.
 2. The recruiter-sim returns a structured response:
    ```yaml
    verdict: INVITE | MAYBE | REJECT

@@ -2,26 +2,18 @@
 /**
  * sponsor-check.mjs — UK licensed-sponsor lookup for career-ops.
  *
- * WHY THIS EXISTS: A UK employer can only sponsor a Skilled Worker visa if it
- * holds a sponsor licence on the gov.uk "Register of licensed sponsors: workers".
- * If you need visa sponsorship to work in the UK (now or when a time-limited
- * visa expires), a role at an unlicensed employer is a dead end no matter how
- * good the fit. This turns oferta.md Step 6's sponsorship tags from a guess
- * ("big company, probably sponsors") into a fact checked against the register.
+ * Source of truth: the gov.uk "Register of licensed sponsors: workers"
+ * (Worker and Temporary Worker), downloaded and stored under
+ * data/uk-sponsor-register/. This script answers: "Is <employer> on the
+ * register, and does it hold a Skilled Worker licence?" — the data that
+ * turns oferta.md's `uk-sponsor-licensed` / `uk-2yr-ceiling` tags from a
+ * guess into a fact (see modes/oferta.md → Step 6, UK two-year horizon).
  *
- * It is only relevant to users who set `work_eligibility.needs_uk_sponsorship:
- * true` in config/profile.yml. Users who are already UK-authorised (citizen,
- * settled/pre-settled, ILR, indefinite right to work) don't need it.
- *
- * Source of truth: the gov.uk "Register of licensed sponsors: Worker and
- * Temporary Worker" list, downloaded and stored under data/uk-sponsor-register/
- * (git-ignored — regenerable, see that folder's README.md for refresh steps).
- *
- * WHY FUZZY MATCHING: register names are legal entities — ALL CAPS, trailing
- * spaces, "LIMITED" vs "Ltd", "T/A <trading name>" aliases, and commas inside
- * quoted names. Job boards show trading names. A naive exact match produces
- * constant false negatives, so we normalise and tier the match by confidence
- * and NEVER return a bare yes/no.
+ * WHY FUZZY MATCHING: register names are legal entities — ALL CAPS,
+ * trailing spaces, "LIMITED" vs "Ltd", "T/A <trading name>" aliases, and
+ * commas inside quoted names. Job boards show trading names. A naive exact
+ * match produces constant false negatives, so we normalise and tier the
+ * match by confidence and NEVER return a bare yes/no.
  *
  * Usage:
  *   node sponsor-check.mjs --company "Monzo Bank"          # human-readable
@@ -37,7 +29,7 @@
  *     query, normalizedQuery,
  *     match: "high" | "medium" | "low" | "none",
  *     skilledWorker: true|false,        // holds a Skilled Worker licence
- *     recommendedTag: "uk-sponsor-licensed" | "uk-sponsor-route-mismatch" | "uk-no-sponsor-licence",
+ *     recommendedTag: "uk-sponsor-licensed" | "uk-2yr-ceiling" | "uk-sponsor-route-mismatch",
  *     best: { name, town, county, rating, routes[] } | null,
  *     candidates: [ ...up to 5 {name, routes[], confidence} ]
  *   }
@@ -49,8 +41,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const __dirname = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const REG_DIR = path.join(__dirname, 'data', 'uk-sponsor-register');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REG_DIR = path.join(__dirname, '..', '..', 'data', 'uk-sponsor-register');
 const INDEX_PATH = path.join(REG_DIR, 'index.json');
 
 // ---------------------------------------------------------------------------
@@ -197,7 +189,6 @@ function rebuild() {
 function loadIndex() {
   if (!fs.existsSync(INDEX_PATH)) {
     console.error('Index not built yet. Run: node sponsor-check.mjs --rebuild');
-    console.error('(First download the register CSV — see data/uk-sponsor-register/README.md)');
     process.exit(1);
   }
   return JSON.parse(fs.readFileSync(INDEX_PATH, 'utf8'));
@@ -218,7 +209,7 @@ function lookup(company, idx) {
     return { confidence: 'high', best: rec, candidates: [rec] };
   }
 
-  // Tier 2/3: scan for containment + fuzzy. (~140k records — linear scan is
+  // Tier 2/3: scan for containment + fuzzy. (127k records — linear scan is
   // a few hundred ms, fine for an evaluation-time call.)
   const scored = [];
   for (const rec of records) {
@@ -259,13 +250,11 @@ function lookup(company, idx) {
 }
 
 function recommendTag(result) {
-  // Not on the register (or too weak a match to trust) -> the employer holds no
-  // sponsor licence we can find, so it cannot sponsor a Skilled Worker visa.
-  if (result.confidence === 'none' || result.confidence === 'low') return 'uk-no-sponsor-licence';
+  if (result.confidence === 'none' || result.confidence === 'low') return 'uk-2yr-ceiling';
   const rec = result.best;
   if (rec && hasSkilledWorker(rec)) return 'uk-sponsor-licensed';
   if (rec) return 'uk-sponsor-route-mismatch';
-  return 'uk-no-sponsor-licence';
+  return 'uk-2yr-ceiling';
 }
 
 // ---------------------------------------------------------------------------
@@ -296,10 +285,10 @@ if (company === null) {
 if (!company.trim()) {
   const none = {
     query: company, normalizedQuery: '', match: 'none', skilledWorker: false,
-    recommendedTag: 'uk-no-sponsor-licence', best: null, candidates: [], registerSource: null,
+    recommendedTag: 'uk-2yr-ceiling', best: null, candidates: [], registerSource: null,
   };
   if (wantJson) console.log(JSON.stringify(none, null, 2));
-  else console.log('\n  (no company provided)\n  -> NOT FOUND on register\n     Recommended Fit-notes tag: uk-no-sponsor-licence\n');
+  else console.log('\n  (no company provided)\n  -> NOT FOUND on register\n     Recommended Fit-notes tag: uk-2yr-ceiling\n');
   process.exit(0);
 }
 

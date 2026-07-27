@@ -41,7 +41,7 @@
   strong { font-weight: 600; }
   section { break-inside: auto; }
 
-  /* Centred top title (e.g. "CV") */
+  /* Centred top title (e.g. "Candidate CV" / "Candidate Lebenslauf") */
   .doc-title {
     text-align: center;
     font-family: var(--serif);
@@ -61,7 +61,7 @@
   }
   .header-text { flex: 1 1 auto; min-width: 0; }
 
-  /* German photo: 3.5cm × 4.5cm, top-right. Rendered only when generator injects PHOTO_BLOCK. */
+  /* German Bewerbungsfoto: 3.5cm × 4.5cm, top-right. Rendered only when generator injects PHOTO_BLOCK. */
   .header-photo {
     flex: 0 0 3.2cm;
     width: 3.2cm;
@@ -194,8 +194,8 @@
 </head>
 <body>
 
-<!-- CENTRED TITLE — "CV" -->
-<div class="doc-title">{{NAME}} {{DOC_LABEL}}</div>
+<!-- No document label above the header — the name + tagline lead the page
+     (matches the EvoLogics reference layout; document-title line removed 2026-07-03). -->
 
 <!-- HEADER: name + tagline + (EN: contact row) | (DE: photo only) -->
 <header class="header avoid-break">
@@ -209,7 +209,7 @@
   </div>
 </header>
 
-<!-- PERSONAL DATA (optional — empty for EN) -->
+<!-- PERSÖNLICHE DATEN (DE Lebenslauf only — empty for EN) -->
 {{PERSONAL_DATA_BLOCK}}
 
 <!-- PROFIL / PROFILE -->

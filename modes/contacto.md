@@ -8,7 +8,7 @@ Generate targeted outreach messages to recruiters, hiring managers, and peers at
 
 ### Step 1 — Identify the target
 
-Via WebSearch + LinkedIn browsing:
+Via web search + LinkedIn browsing:
 
 - **Recruiter** — talent acquisition, sourcing, recruiting role at the company.
 - **Hiring Manager** — the person who leads the hiring team (look for the JD's "reports to" line, then LinkedIn for their profile).

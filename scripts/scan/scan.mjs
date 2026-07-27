@@ -25,7 +25,6 @@
  *   node scan.mjs --dry-run        # preview without writing files
  *   node scan.mjs --company Cohere # scan a single company
  *   node scan.mjs --verify         # Playwright-check each new URL; drop expired postings
- *   node scan.mjs --include-watch  # include `watch`-tier titles (only when config/role-taxonomy.yml exists)
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, readdirSync } from 'fs';
@@ -179,6 +178,30 @@ export function buildLocationFilter(locationFilter) {
 
 // ── Dedup ───────────────────────────────────────────────────────────
 
+// Canonical URL for dedup — mirrors bd-bulk-scan.mjs canonicalUrl() exactly.
+// Raw-string comparison let trailing-slash and tracking-param variants of the
+// SAME posting through (e.g. careerbee `/x/` vs `/x`, Stepstone `?rltr=...`),
+// producing duplicate Notion rows (found 2026-07-02). Both add and has go
+// through this.
+function canonicalUrl(u) {
+  if (!u) return '';
+  let s;
+  try { s = decodeURIComponent(u); } catch { s = u; }
+  // The job id lives in the QUERY STRING for some portals (Civil Service
+  // jobs.cgi?jcode=…, Indeed viewjob?jk=…). Capture it before dropping the
+  // query, else every distinct vacancy collapses to the same base path and is
+  // wrongly deduped. Other tracking params (?rltr=, ?lang=) still get stripped.
+  const idMatch = s.match(/[?&](jcode|jk)=([A-Za-z0-9]+)/i);
+  s = s.split('#')[0];
+  s = s.split('?')[0];
+  s = s.toLowerCase();
+  s = s.replace(/\/+$/, '');
+  s = s.replace(/-inline\.html$/, '');
+  s = s.replace(/\.html$/, '');
+  if (idMatch) s += `?${idMatch[1].toLowerCase()}=${idMatch[2].toLowerCase()}`;
+  return s;
+}
+
 function loadSeenUrls() {
   const seen = new Set();
 
@@ -187,7 +210,7 @@ function loadSeenUrls() {
     const lines = readFileSync(SCAN_HISTORY_PATH, 'utf-8').split('\n');
     for (const line of lines.slice(1)) { // skip header
       const url = line.split('\t')[0];
-      if (url) seen.add(url);
+      if (url) seen.add(canonicalUrl(url));
     }
   }
 
@@ -195,7 +218,7 @@ function loadSeenUrls() {
   if (existsSync(PIPELINE_PATH)) {
     const text = readFileSync(PIPELINE_PATH, 'utf-8');
     for (const match of text.matchAll(/- \[[ x]\] (https?:\/\/\S+)/g)) {
-      seen.add(match[1]);
+      seen.add(canonicalUrl(match[1]));
     }
   }
 
@@ -203,7 +226,7 @@ function loadSeenUrls() {
   if (existsSync(APPLICATIONS_PATH)) {
     const text = readFileSync(APPLICATIONS_PATH, 'utf-8');
     for (const match of text.matchAll(/https?:\/\/[^\s|)]+/g)) {
-      seen.add(match[0]);
+      seen.add(canonicalUrl(match[0]));
     }
   }
 
@@ -453,9 +476,8 @@ async function main() {
 
   // Title filter source of truth = config/role-taxonomy.yml when present
   // (core+adjacent → positive, watch behind --include-watch, exclusions →
-  // negative). Falls back to the hand-maintained portals.yml title_filter when
-  // the taxonomy file is absent (the default). This module is opt-in: copy
-  // config/role-taxonomy.example.yml → config/role-taxonomy.yml to enable it.
+  // negative). Falls back to the hand-maintained portals.yml title_filter if the
+  // taxonomy file is absent. See docs/ROLE_TAXONOMY_ENRICHMENT_PROMPT.md.
   const _tax = loadTaxonomy(path.dirname(PORTALS_PATH) || '.');
   const _titleFilterSpec = _tax ? deriveTitleFilter(_tax, { includeWatch }) : config.title_filter;
   if (_tax) {
@@ -535,7 +557,7 @@ async function main() {
           totalFilteredLocation++;
           continue;
         }
-        if (seenUrls.has(job.url)) {
+        if (seenUrls.has(canonicalUrl(job.url))) {
           totalDupes++;
           continue;
         }
@@ -545,7 +567,7 @@ async function main() {
           continue;
         }
         // Mark as seen to avoid intra-scan dupes
-        seenUrls.add(job.url);
+        seenUrls.add(canonicalUrl(job.url));
         seenCompanyRoles.add(key);
         newOffers.push({ ...job, source: sourceName });
       }

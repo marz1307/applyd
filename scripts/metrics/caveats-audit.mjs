@@ -1,16 +1,12 @@
 #!/usr/bin/env node
 /**
- * caveats-audit.mjs — scan output/ for cv-quality-rules.md violations
+ * caveats-audit.mjs — scan output/ for cv-quality-rules.md Section 4 violations
  *
- * A fast, zero-LLM lint over generated candidate-facing copy (CVs, cover
- * letters). Reports per-file counts of:
+ * Reports per-file counts of:
  *  - Em dashes (—)
  *  - En dashes (–)
- *  - Banned vocabulary (high-signal AI-tell words)
+ *  - Banned vocabulary
  *  - Banned constructions (copula-avoidance, negative parallelism)
- *
- * The word/construction lists mirror `modes/cv-quality-rules.md` → "Banned
- * vocabulary" / "Banned constructions". Tune both together.
  *
  * Usage: node caveats-audit.mjs [--root output/] [--json] [--top 30]
  */
@@ -65,8 +61,8 @@ const BANNED_CONSTRUCTIONS = [
   // skipping to avoid false positives in CV body — manual review preferred
   "not just",
   "not only",
-  // Abbreviations that read as filler in candidate-facing copy — spell them out
-  // ("the role" / "the job description" rather than "JD").
+  // Abbreviations that must never appear in candidate-facing copy (spell them out:
+  // "the role" / "the job description").
   "JD",
 ];
 

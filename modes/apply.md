@@ -6,8 +6,8 @@ Interactive mode for when the candidate is filling out an application form in Ch
 
 ## Requirements
 
-- **Best with Playwright in visible mode**: In visible mode, the candidate sees the browser and Claude can interact with the page.
-- **Without Playwright**: the candidate shares a screenshot or pastes the questions manually.
+- **Best with a browser-automation tool in visible mode** (Claude: Playwright MCP; other agents: their equivalent). The candidate sees the browser and the agent can interact with the page.
+- **Without browser automation**: the candidate shares a screenshot or pastes the questions manually.
 
 ## Workflow
 
@@ -24,10 +24,10 @@ Interactive mode for when the candidate is filling out an application form in Ch
 
 ## Step 1 — Detect the job
 
-**With Playwright:** Take a snapshot of the active page. Read title, URL, and visible content.
+**With browser automation:** Take a snapshot of the active page. Read title, URL, and visible content.
 
-**Without Playwright:** Ask the candidate to:
-- Share a screenshot of the form (Read tool can read images)
+**Without browser automation:** Ask the candidate to:
+- Share a screenshot of the form (the agent's file-read capability can usually accept images)
 - Or paste the form questions as text
 - Or say company + role so we can search for it
 

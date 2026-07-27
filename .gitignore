@@ -56,6 +56,7 @@ modes/_profile.md
 
 # Secrets (never commit — use .env.example as template)
 .env
+*.env
 # Token / credential files — generic safety net so accidental drops
 # don't land in history. Use User-scope env vars (setx) instead.
 *.token
@@ -63,6 +64,7 @@ modes/_profile.md
 *secret*
 apify.txt
 brightdata.txt
+config/.anthropic-api-key.disabled.txt
 
 # Generated
 .resolved-prompt-*
@@ -78,6 +80,7 @@ bun.lock
 .claude/settings.local.json
 .claude/memory/
 career-dashboard
+.test-dashboard-build
 package-lock.json
 # CV generator outputs
 cv/output/
@@ -90,3 +93,12 @@ data/.alerts/
 data/.tunnel/
 data.json
 data/bd-seen-urls.json
+
+# Generated pipeline data — regenerable
+interview-prep/
+dashboard.html
+data/dashboard.json
+data/.tmp/
+data/*.log
+.firecrawl/
+data/wttj-sitemap-candidates.json

@@ -1,6 +1,6 @@
 # CV Quality Rules — local distillation of IDE skill caveats
 
-**Why this file exists.** The IDE-level skills that produced the gold-standard CVs in `scripts/cv/generate-pdf-tailored.mjs` — `resume-writer`, `tech-cv-review`, `humanizer`, `recruiter-sim` — don't load under headless `claude -p`. The scheduled `auto-draft` and `auto-eval` routines can't invoke them. This file distils their caveats so the routines can apply the same standards inline.
+**Why this file exists.** The IDE-level skills that produced the gold-standard CVs in `scripts/cv/generate-pdf-tailored.mjs` — `resume-writer`, `tech-cv-review`, `humanizer`, `recruiter-sim` — don't load under a headless agent CLI (`claude -p`, `codex exec`, `gemini -p`, …). The scheduled `auto-draft` and `auto-eval` routines can't invoke them. This file distils their caveats so the routines can apply the same standards inline.
 
 `auto-draft.md` and `auto-eval.md` must **read this file once at start** and apply every rule below to every CV they generate or evaluate.
 
@@ -144,7 +144,98 @@ If predicted rate < baseline by ≥5 percentage points, flag as `[probability_be
 
 ---
 
-## 9. What this file does NOT replace
+## 9. German fluency rules — apply to every `--lang de` output and every DACH cover letter
+
+**Source.** Distilled from the `de-translation-eval` skill. These rules are non-negotiable for any DACH-bound artifact (Lebenslauf, Anschreiben, form-answers, interview prep).
+
+### 9.1 Register
+- **Sie-form throughout.** Never `du`. Audience: senior engineers, hiring managers, recruiters at DACH companies. Same rule for Anschreiben opening (`Sehr geehrte Damen und Herren`) and closing (`Mit freundlichen Grüßen`).
+- Avoid `man` constructions in CV/cover-letter — use first-person past (`Ich habe …`) or impersonal noun phrases.
+- Tone is DACH-tech-professional: factual, restrained, evidence-led. No marketing voice.
+
+### 9.2 Tech terms stay English (do NOT translate)
+`Pipeline, Repository, Stack, Framework, Endpoint, Cache, Schema, Workflow, Backend, Frontend, Service, Build, Deploy, Container, Test Suite, Dashboard, Forecast, Insight, Random Forest, Logistic Regression, ARIMA, ETS, Power BI Desktop, DAX, sklearn Pipeline, ColumnTransformer, FeatureUnion, gensim, NLTK, dbt, Dagster, Snowflake, BigQuery, Databricks, Kafka, Airflow, MCP, FastAPI, JWT, Row-Level Security, GitHub Actions, pytest, Survival Analysis, Causal Inference, SHAP, XGBoost, MLflow, A/B-Testing` — and similar.
+
+Wrong: `Förderkette` (for "pipeline"), `Zufallswald` (for "Random Forest"), `Berichtstafel` (for "dashboard").
+
+### 9.3 German rendering for non-tech terms (DO translate these)
+| English | German |
+|---|---|
+| data layer | Datenebene |
+| data quality | Datenqualität |
+| methodology | Methodik |
+| reproducibility | Reproduzierbarkeit |
+| production-grade | produktionsreif |
+| companion script / validator | Begleit-Skript / Begleit-Validator |
+| sidebar | Seitenleiste |
+| results | Ergebnisse |
+| lessons | Erkenntnisse |
+| problem | Problem |
+| architecture | Architektur |
+| my contribution | Mein Beitrag |
+
+### 9.4 Gendered loanword genders (memorise these)
+`die Pipeline · der Stack · das Dashboard · das Repository · das Feature · der Forecast · das Backend · das Frontend · der Service · der Build · der Container · das Schema · das Insight · der Workflow · der Endpoint · das Modell · die API · die Query · der Cluster`.
+
+### 9.5 Number, date, currency formatting
+- **Thousands separator: dot** — `8.158`, `11.825`, `1.000.000`.
+- **Decimal separator: comma** — `0,985`, `7,76`, `3,67`.
+- **Currency:** `7,76 EUR`, `92.000 EUR/Jahr` (NOT `€7.76`).
+- **Date ranges: "bis"** — `Januar 2026 bis April 2026` (NOT `Januar 2026 – April 2026` with a dash). Inside the CV template, `meta` strings like `01/2026 – 04/2026` use slash-with-hyphen which is fine for the Lebenslauf table layout, but body prose ALWAYS uses "bis".
+- Calendar weeks: `KW 22/2026` style if needed.
+
+### 9.6 Hyphenation for English-derived compounds
+German rules: when a compound noun mixes English + German, all spaces become hyphens.
+- `End-to-End-Artefakt`, `GitHub-Actions-CI-Matrix`, `Python-Validator`, `sklearn-Pipeline`, `dbt-Modell`, `Customer-Success-Workflow`, `Model-Context-Protocol-Endpoint`, `Row-Level-Security`, `Append-Only-Raw-Schicht`.
+- `End-to-End Artefakt`, `dbt Modell`, `Row Level Security`.
+
+### 9.7 Banned characters / patterns (DACH-shipped content)
+- **0 em-dashes or en-dashes** in body prose. Use commas, colons, parentheses, or "bis". The single exception is the role-meta date-range line where the template uses `–` as part of the existing typography — leave that alone, but never introduce new dashes elsewhere.
+- 0 mentions of any AI vendor / tooling attribution — `Claude`, `Anthropic`, `Codex`, `GPT`, `OpenAI`, `Gemini`, `Copilot`, `KI-Assistenz`, `Generated with`, `Co-authored-by AI` — anywhere shipped.
+- 0 coursework markers in shipped content (`Hausarbeit`, `Übung`, `Modul`, `Kursaufgabe`, `Studienarbeit`). `MSc-Abschlussarbeit` for the dissertation is fine.
+
+### 9.8 Standard section / heading translations
+| EN | DE |
+|---|---|
+| Profile | Profil |
+| Experience | Berufserfahrung |
+| Education | Ausbildung |
+| Projects | Projekte |
+| Technical Skills | Technische Kenntnisse |
+| Languages | Sprachen |
+| Certifications | Zertifikate |
+| Community & Leadership | Engagement |
+| Availability | Verfügbarkeit |
+
+The DE CV template already uses these — never substitute synonyms.
+
+### 9.9 Anschreiben-specific (DACH cover letter)
+- **Opening salutation:** `Sehr geehrte Damen und Herren,` (no named recipient known) or `Sehr geehrte Frau {Lastname},` / `Sehr geehrter Herr {Lastname},`.
+- **Closing:** `Mit freundlichen Grüßen` (followed by blank line, then typed name; no comma after the closing phrase in modern DACH usage).
+- **Length:** 250–350 words. One A4 page max.
+- **Structure:** four paragraphs — (1) Position + 1-sentence hook, (2) why-you (2-3 JD requirements matched to evidence), (3) why-them (company-specific, not boilerplate), (4) availability + salary anchor + interview offer.
+- **No bullet lists** — paragraphs only. DACH norm.
+- **Work authorisation:** state neutrally in para 4 if the JD is sponsorship-sensitive. Never in para 1.
+- **Photo:** never in the Anschreiben (only in the Lebenslauf, and only the DE template).
+- **Salary anchor:** specify range in EUR per year using German formatting — `Mein Gehaltsrahmen liegt zwischen 65.000 EUR und 78.000 EUR pro Jahr`.
+- **German-level mention — DEFAULT: do NOT mention.** The Lebenslauf's Sprachen section already carries it. Repeating it in the Anschreiben turns the level into a disclaimer. ONLY mention if the JD explicitly requires `Verhandlungssicher` / `C1` / `C2`.
+
+### 9.10 Self-check before shipping any DE artifact
+Run these mental sweeps:
+1. Sie-form everywhere? Any stray `du`/`dein`/`dich`?
+2. Tech terms still English where standard (9.2)?
+3. Loanword genders correct (9.4)?
+4. Numbers formatted German (9.5)?
+5. English-compound nouns hyphenated (9.6)?
+6. 0 em/en-dashes in body prose (9.7)?
+7. Section headings exact match to 9.8 table?
+8. For Anschreiben: 4-paragraph structure, no bullets (9.9)?
+
+If any check fails, fix before shipping.
+
+---
+
+## 10. What this file does NOT replace
 
 - Manual review by the user remains the gold standard. This file gets the auto-draft pipeline to ~85% of skill-driven quality without IDE plugins. The remaining 15% (subtle voice, market intuition, NDA-sensitive phrasing) is intentionally a human responsibility at the Stage-4 review checkpoint.
-- The IDE skills are still useful when the user is in an interactive Claude Code session — they auto-trigger on CV file events. This file is the *fallback for headless routines only*.
+- The IDE skills are still useful when the user is in an interactive agent session (Claude Code, Cursor, Zed, …) — they can auto-trigger on CV file events. This file is the *fallback for headless routines only*.

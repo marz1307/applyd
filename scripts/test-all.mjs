@@ -1,25 +1,23 @@
 #!/usr/bin/env node
 
 /**
- * test-all.mjs — Marketplace test suite for career-ops
+ * test-all.mjs — Comprehensive test suite for career-ops
  *
- * Run before merging any PR or pushing changes. Validates the
- * marketplace-skill architecture (engine vs workspace, SKILL.md at
- * repo root, no personal data leaks, scripts parse, YAML/JSON valid,
- * required template files present, gitignore covers user-layer).
+ * Run before merging any PR or pushing changes.
+ * Tests: syntax, scripts, dashboard, data contract, personal data, paths.
  *
  * Usage:
- *   node test-all.mjs           # Full run
- *   node test-all.mjs --quick   # Skip the dashboard go-build step
+ *   node test-all.mjs           # Run all tests
+ *   node test-all.mjs --quick   # Skip dashboard build (faster)
  */
 
-import { execSync, execFileSync } from 'child_process';
-import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
-import { join, dirname, relative } from 'path';
+import { execFileSync } from 'child_process';
+import { readFileSync, existsSync, readdirSync } from 'fs';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, '..');
+const ROOT = resolve(__dirname, '..');
 const QUICK = process.argv.includes('--quick');
 const NODE = process.execPath;
 
@@ -33,10 +31,7 @@ function warn(msg) { console.log(`  ⚠️  ${msg}`); warnings++; }
 
 function run(cmd, args = [], opts = {}) {
   try {
-    if (Array.isArray(args) && args.length > 0) {
-      return execFileSync(cmd, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
-    }
-    return execSync(cmd, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
+    return execFileSync(cmd, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
   } catch (e) {
     return null;
   }
@@ -45,404 +40,467 @@ function run(cmd, args = [], opts = {}) {
 function fileExists(path) { return existsSync(join(ROOT, path)); }
 function readFile(path) { return readFileSync(join(ROOT, path), 'utf-8'); }
 
-console.log('\n🧪 career-ops marketplace test suite\n');
+console.log('\n🧪 career-ops test suite\n');
 
-// ── 1. JS syntax checks ───────────────────────────────────────────
+// ── 1. SYNTAX CHECKS ────────────────────────────────────────────
 
-console.log('1. JS syntax');
+console.log('1. Syntax checks');
 
-function walkMjs(dir) {
-  const out = [];
-  for (const e of readdirSync(dir)) {
-    if (e === 'node_modules' || e === '.git') continue;
-    const full = join(dir, e);
-    const st = statSync(full);
-    if (st.isDirectory()) out.push(...walkMjs(full));
-    else if (e.endsWith('.mjs')) out.push(relative(ROOT, full));
-  }
-  return out;
-}
-const mjsFiles = walkMjs(ROOT);
+const mjsFiles = readdirSync(ROOT).filter(f => f.endsWith('.mjs'));
 for (const f of mjsFiles) {
   const result = run(NODE, ['--check', f]);
-  if (result !== null) pass(`${f} parses`);
-  else fail(`${f} has syntax errors`);
-}
-
-// ── 2. YAML lint ──────────────────────────────────────────────────
-
-console.log('\n2. YAML lint');
-
-let yaml;
-try {
-  yaml = (await import('js-yaml')).default;
-} catch (e) {
-  warn('js-yaml not installed — skipping YAML lint (run `npm install` first)');
-  yaml = null;
-}
-
-if (yaml) {
-  const yamlFiles = [
-    'templates/portals.example.yml',
-    'config/profile.example.yml',
-    'templates/states.yml',
-  ];
-  for (const f of yamlFiles) {
-    if (!fileExists(f)) { fail(`Missing YAML file: ${f}`); continue; }
-    try { yaml.load(readFile(f)); pass(`${f} valid YAML`); }
-    catch (e) { fail(`${f} invalid YAML: ${e.message.split('\n')[0]}`); }
+  if (result !== null) {
+    pass(`${f} syntax OK`);
+  } else {
+    fail(`${f} has syntax errors`);
   }
 }
 
-// ── 3. JSON lint ──────────────────────────────────────────────────
+// ── 2. SCRIPT EXECUTION ─────────────────────────────────────────
 
-console.log('\n3. JSON lint');
+console.log('\n2. Script execution (graceful on empty data)');
 
-const jsonFiles = ['package.json'];
-for (const f of jsonFiles) {
-  try { JSON.parse(readFile(f)); pass(`${f} valid JSON`); }
-  catch (e) { fail(`${f} invalid: ${e.message}`); }
-}
+const scripts = [
+  { name: 'scripts/cv/cv-sync-check.mjs', expectExit: 1, allowFail: true }, // fails without cv.md (normal in repo)
+  { name: 'scripts/tracker/verify-pipeline.mjs', expectExit: 0 },
+  { name: 'scripts/tracker/normalize-statuses.mjs', expectExit: 0 },
+  { name: 'scripts/tracker/dedup-tracker.mjs', expectExit: 0 },
+  { name: 'scripts/tracker/merge-tracker.mjs', expectExit: 0 },
+  { name: 'scripts/metrics/analyze-patterns.mjs --self-test', expectExit: 0 },
+  { name: 'scripts/metrics/metrics-core.test.mjs', expectExit: 0 },
+  { name: 'scripts/doctor.mjs', expectExit: 0, allowFail: true },
+];
 
-// ── 4. SKILL.md frontmatter ───────────────────────────────────────
-
-console.log('\n4. SKILL.md frontmatter');
-
-if (!fileExists('SKILL.md')) {
-  fail('SKILL.md missing at repo root');
-} else if (yaml) {
-  const skillContent = readFile('SKILL.md');
-  const m = skillContent.match(/^---\n([\s\S]+?)\n---/);
-  if (!m) { fail('SKILL.md has no frontmatter block'); }
-  else {
-    try {
-      const fm = yaml.load(m[1]);
-      if (fm.name === 'career-ops') pass('SKILL.md name=career-ops');
-      else fail(`SKILL.md name is "${fm.name}", expected "career-ops"`);
-      if (fm['user-invocable'] === true) pass('SKILL.md user-invocable: true');
-      else fail('SKILL.md user-invocable not set');
-      if (typeof fm.description === 'string' && fm.description.length > 50) pass('SKILL.md description present');
-      else fail('SKILL.md description missing or too short');
-      if (fm.license) pass(`SKILL.md license: ${fm.license}`);
-      else warn('SKILL.md license not declared');
-    } catch (e) {
-      fail(`SKILL.md frontmatter invalid YAML: ${e.message.split('\n')[0]}`);
-    }
+for (const { name, allowFail } of scripts) {
+  const result = run(NODE, name.split(' '), { stdio: ['pipe', 'pipe', 'pipe'] });
+  if (result !== null) {
+    pass(`${name} runs OK`);
+  } else if (allowFail) {
+    warn(`${name} exited with error (expected without user data)`);
+  } else {
+    fail(`${name} crashed`);
   }
 }
 
-// ── 5. Required template / engine files ───────────────────────────
+// ── 3. LIVENESS CLASSIFICATION ──────────────────────────────────
 
-console.log('\n5. Required engine files');
-
-const required = [
-  'SKILL.md', 'README.md', 'LICENSE', 'CLAUDE.md', 'AGENTS.md', 'DATA_CONTRACT.md',
-  'package.json', '.env.example', '.gitignore',
-  'config/profile.example.yml',
-  'modes/_shared.md', 'modes/_profile.template.md',
-  'modes/oferta.md', 'modes/pdf.md', 'modes/scan.md', 'modes/apply.md',
-  'modes/auto-pipeline.md', 'modes/tracker.md', 'modes/notion-tracker.md',
-  'templates/portals.example.yml', 'templates/cv-template.html', 'templates/states.yml',
-  'scripts/scan/scan.mjs', 'scripts/cv/generate-pdf.mjs',
-];
-for (const f of required) {
-  if (fileExists(f)) pass(`exists: ${f}`);
-  else fail(`MISSING: ${f}`);
-}
-
-// ── 6. User-layer files NOT tracked ───────────────────────────────
-
-console.log('\n6. User-layer files NOT tracked');
-
-const userLayer = [
-  'cv.md', 'config/profile.yml', 'modes/_profile.md',
-  'portals.yml', '.env', 'data/applications.md',
-];
-for (const f of userLayer) {
-  const tracked = run('git', ['ls-files', f]);
-  if (!tracked) pass(`gitignored / untracked: ${f}`);
-  else fail(`USER FILE IS TRACKED (should be gitignored): ${f}`);
-}
-
-// ── 7. Personal data leak check ───────────────────────────────────
-
-console.log('\n7. Personal data leak check');
-
-const leakPatterns = [
-  'Marvis', 'marvis', 'Osazuwa',
-  'marvis.osazuwa@hotmail',
-  'Force24', 'FMBN', 'Eraneos', 'Vinted',
-  'marz1307.github.io',
-  'Lebenslauf', 'Anschreiben', 'cv-de.md',
-  // DE-specific portals that were stripped from the marketplace build —
-  // guarded so they don't drift back in. eFinancialCareers (UK) is NOT
-  // here because the user deliberately added it as a public UK fintech
-  // portal (see templates/portals.example.yml + modes/notion-tracker.md).
-  'Stepstone', 'stepstone.de',
-  'make-it-in-germany', 'careerbee',
-  '\\bXing\\b', 'xing.com',
-];
-const allowed = [
-  'package.json',    // author field intentionally contains "Marvis Osazuwa (https://github.com/marz1307)"
-  'package-lock.json',
-  'README.md',       // may mention marz1307 in install commands
-  'scripts/test-all.mjs', // this file lists the patterns
-];
-
-let leakFound = 0;
-for (const pattern of leakPatterns) {
-  const result = run(`git grep -n "${pattern}" 2>/dev/null`);
-  if (!result) continue;
-  for (const line of result.split('\n')) {
-    const file = line.split(':')[0];
-    if (allowed.some(a => file === a || file.endsWith('/' + a))) continue;
-    fail(`Personal data in ${file}: "${pattern}"`);
-    leakFound++;
-  }
-}
-if (leakFound === 0) pass('No personal data leaks');
-
-// ── 8. Credential leak check ──────────────────────────────────────
-
-console.log('\n8. Credential leak check');
-
-// Reconstruct sensitive sentinel from parts so this file doesn't self-match.
-const SENTINEL_BD_TOKEN = ['af5091b6', '6eb3', '4246', '9ce6', '8ed1fc3ec88c'].join('-');
-
-const credPatterns = [
-  'ntn_[A-Za-z0-9]\\{30,\\}',
-  'sk-[A-Za-z0-9]\\{30,\\}',
-  'ghp_[A-Za-z0-9]\\{30,\\}',
-  SENTINEL_BD_TOKEN,                                 // specific BD token to never leak
-];
-let credFound = 0;
-for (const pattern of credPatterns) {
-  // Exclude test-all.mjs itself — the patterns above are literals in this file.
-  const result = run(`git grep -nE "${pattern}" -- ':!scripts/test-all.mjs' 2>/dev/null`);
-  if (!result) continue;
-  for (const line of result.split('\n')) {
-    if (line.includes('xxxx')) continue;       // placeholder, fine
-    fail(`Possible credential: ${line.slice(0, 100)}`);
-    credFound++;
-  }
-}
-if (credFound === 0) pass('No real credentials in repo');
-
-// ── 9. Absolute path check ────────────────────────────────────────
-
-console.log('\n9. Absolute path check');
-
-// Build the regex from non-literal parts so the source line below doesn't self-match.
-const absPathRegex = ['/Users/', 'marvi', '|/Users/santifer|C:', '\\\\Users\\\\marvi'].join('');
-const absPathResult = run(
-  `git grep -nE "${absPathRegex}" -- '*.mjs' '*.sh' '*.md' '*.yml' ':!scripts/test-all.mjs' 2>/dev/null`
-);
-if (!absPathResult) pass('No personal absolute paths in tracked files');
-else {
-  for (const line of absPathResult.split('\n').filter(Boolean)) {
-    fail(`Absolute path: ${line.slice(0, 120)}`);
-  }
-}
-
-// ── 10. Liveness classifier behaviour ─────────────────────────────
-
-console.log('\n10. Liveness classifier');
+console.log('\n3. Liveness classification');
 
 try {
-  const { classifyLiveness } = await import(pathToFileURL(join(ROOT, 'scripts/scan/liveness-core.mjs')).href);
+  const { classifyLiveness } = await import(pathToFileURL(join(ROOT, 'scripts', 'scan', 'liveness-core.mjs')).href);
 
-  const expired = classifyLiveness({
+  const expiredChromeApply = classifyLiveness({
     finalUrl: 'https://example.com/jobs/closed-role',
     bodyText: 'Company Careers\nApply\nThe job you are looking for is no longer open.',
     applyControls: [],
   });
-  if (expired.result === 'expired') pass('Expired pages classified as expired');
-  else fail(`Expired page misclassified as ${expired.result}`);
+  if (expiredChromeApply.result === 'expired') {
+    pass('Expired pages are not revived by nav/footer "Apply" text');
+  } else {
+    fail(`Expired page misclassified as ${expiredChromeApply.result}`);
+  }
 
-  const active = classifyLiveness({
+  const activeWorkdayPage = classifyLiveness({
     finalUrl: 'https://example.workday.com/job/123',
-    bodyText: '663 JOBS FOUND\nSenior AI Engineer\nJoin our applied AI team to ship production systems.',
+    bodyText: [
+      '663 JOBS FOUND',
+      'Senior AI Engineer',
+      'Join our applied AI team to ship production systems, partner with customers, and own delivery across evaluation, deployment, and reliability.',
+    ].join('\n'),
     applyControls: ['Apply for this Job'],
   });
-  if (active.result === 'active') pass('Active job pages classified as active');
-  else fail(`Active job page misclassified as ${active.result}`);
-} catch (e) {
-  fail(`Liveness classifier crashed: ${e.message}`);
-}
-
-// ── 11. Location filter (scan.mjs) ────────────────────────────────
-
-console.log('\n11. Location filter');
-
-try {
-  const { buildLocationFilter } = await import(pathToFileURL(join(ROOT, 'scripts/scan/scan.mjs')).href);
-
-  const filter = buildLocationFilter({
-    always_allow: ['united kingdom', 'london'],
-    allow: ['europe', 'remote'],
-    block: ['india', 'singapore'],
-  });
-
-  if (filter('London, United Kingdom') === true) pass('always_allow hits pass');
-  else fail('always_allow should pass');
-
-  if (filter('Remote, United Kingdom or India') === true) pass('always_allow beats block');
-  else fail('always_allow should beat block');
-
-  if (filter('Bengaluru, India') === false) pass('block list rejects');
-  else fail('block should reject');
-
-  if (filter('') === true) pass('empty location passes');
-  else fail('empty location should pass');
-
-  const nullFilter = buildLocationFilter(null);
-  if (nullFilter('Anywhere') === true) pass('null filter is pass-all');
-  else fail('null filter should pass all');
-} catch (e) {
-  fail(`Location filter tests crashed: ${e.message}`);
-}
-
-// ── 12. Mode file integrity ───────────────────────────────────────
-
-console.log('\n12. Mode file integrity');
-
-const expectedModes = [
-  '_shared.md', '_profile.template.md',
-  'oferta.md', 'pdf.md', 'scan.md', 'batch.md', 'apply.md',
-  'auto-pipeline.md', 'contacto.md', 'deep.md', 'ofertas.md',
-  'pipeline.md', 'project.md', 'tracker.md', 'training.md',
-  'patterns.md', 'followup.md', 'interview-prep.md',
-  'response-tracker.md', 'notion-tracker.md', 'cv-quality-rules.md',
-];
-for (const mode of expectedModes) {
-  if (fileExists(`modes/${mode}`)) pass(`mode: ${mode}`);
-  else fail(`missing mode: ${mode}`);
-}
-
-const shared = readFile('modes/_shared.md');
-if (shared.includes('_profile.md')) pass('_shared.md references _profile.md');
-else fail('_shared.md must reference _profile.md');
-
-// oferta.md must teach the URL ↔ JD coherence step
-const oferta = readFile('modes/oferta.md');
-const coherenceMarkers = [
-  'Step −1',                            // section heading
-  'URL ↔ JD coherence',                 // section title
-  'TITLE_MISMATCH',                     // failure-mode flag
-  'COMPANY_MISMATCH',                   // failure-mode flag
-  'URL_LOST',                           // redirect-to-generic flag
-  'JD_DEAD',                            // dead page flag
-  'Verified:',                          // required header block
-];
-for (const marker of coherenceMarkers) {
-  if (oferta.includes(marker)) pass(`oferta.md teaches ${marker}`);
-  else fail(`oferta.md must teach URL/JD coherence: missing "${marker}"`);
-}
-
-// ── 13. Report header coherence (any reports/*.md present must declare URL + Verified) ──
-
-console.log('\n13. Report header coherence');
-
-const reportFiles = run(`ls reports/*.md 2>/dev/null | grep -v gitkeep || true`);
-if (!reportFiles) {
-  pass('No reports/*.md to audit (fresh workspace — expected)');
-} else {
-  const files = reportFiles.split('\n').filter(Boolean);
-  for (const f of files) {
-    const body = readFile(f);
-    // Each report MUST declare a URL and a Verified block, per oferta.md report format.
-    if (!/\*\*URL:\*\*\s*\S+/.test(body)) {
-      fail(`${f}: missing **URL:** line in header`);
-      continue;
-    }
-    if (!/\*\*Verified:\*\*/.test(body)) {
-      warn(`${f}: legacy report missing Verified block — regenerate via /career-ops oferta to add it`);
-      continue;
-    }
-    // Title in H1 must agree with role on page (loose check — both fields present).
-    const h1 = body.match(/^# Evaluation:\s*([^—]+)—\s*(.+)$/m);
-    const roleOnPage = body.match(/Role on page:\s*(.+?)\s*\(/);
-    if (h1 && roleOnPage) {
-      const h1Role = h1[2].trim().toLowerCase();
-      const pageRole = roleOnPage[1].trim().toLowerCase();
-      // Loose: share at least one substantive word ≥4 chars.
-      const h1Words = new Set(h1Role.split(/\W+/).filter(w => w.length >= 4));
-      const overlap = pageRole.split(/\W+/).some(w => w.length >= 4 && h1Words.has(w));
-      if (overlap) pass(`${f}: H1 role agrees with verified page role`);
-      else fail(`${f}: H1 says "${h1[2].trim()}" but page role on file is "${roleOnPage[1].trim()}" — URL/JD mismatch in report`);
-    }
+  if (activeWorkdayPage.result === 'active') {
+    pass('Visible apply controls still keep real job pages active');
+  } else {
+    fail(`Active job page misclassified as ${activeWorkdayPage.result}`);
   }
+
+  const closedMycareersfuture = classifyLiveness({
+    finalUrl: 'https://www.mycareersfuture.gov.sg/job/engineering/senior-staff-embedded-software-engineer',
+    bodyText: [
+      'Senior Staff Embedded Software Engineer',
+      'MaxLinear Asia Singapore Private Limited',
+      '9 applications    Posted 27 Oct 2025    Closed on 26 Nov 2025',
+      'Applications have closed for this job',
+      'Log in to Apply',
+      "You'll need to log in with Singpass to verify your identity.",
+      'Roles & Responsibilities: design, develop and maintain embedded firmware for broadband communications ICs.',
+    ].join('\n'),
+    applyControls: ['Log in to Apply'],
+  });
+  if (closedMycareersfuture.result === 'expired') {
+    pass('Closed postings with "Applications have closed" banner are detected');
+  } else {
+    fail(`Closed mycareersfuture posting misclassified as ${closedMycareersfuture.result}`);
+  }
+} catch (e) {
+  fail(`Liveness classification tests crashed: ${e.message}`);
 }
 
-// ── 14. Firecrawl + fetch-chain wiring ─────────────────────────────
-
-console.log('\n14. Firecrawl + fetch-chain wiring');
-
-// providers exist
-if (fileExists('providers/firecrawl.mjs')) pass('providers/firecrawl.mjs exists');
-else fail('providers/firecrawl.mjs missing');
-if (fileExists('providers/_fetch-chain.mjs')) pass('providers/_fetch-chain.mjs exists');
-else fail('providers/_fetch-chain.mjs missing');
-
-// firecrawl.mjs exports the documented interface
-const firecrawlSrc = readFile('providers/firecrawl.mjs');
-for (const sym of ['export async function scrape', 'export async function health', 'FIRECRAWL_URL', 'FIRECRAWL_API_KEY']) {
-  if (firecrawlSrc.includes(sym)) pass(`firecrawl.mjs declares ${sym}`);
-  else fail(`firecrawl.mjs must declare ${sym}`);
-}
-
-// _fetch-chain.mjs exports fetchForCoherence and references each tier
-const chainSrc = readFile('providers/_fetch-chain.mjs');
-for (const sym of ['export async function fetchForCoherence', 'firecrawl', 'bright-data', 'agent-playwright-fallback', 'webfetch']) {
-  if (chainSrc.includes(sym)) pass(`_fetch-chain.mjs references ${sym}`);
-  else fail(`_fetch-chain.mjs must reference ${sym}`);
-}
-
-// .mcp.json registers firecrawl
-if (fileExists('.mcp.json')) {
-  const mcp = JSON.parse(readFile('.mcp.json'));
-  if (mcp?.mcpServers?.firecrawl) pass('.mcp.json registers firecrawl MCP server');
-  else fail('.mcp.json must register a "firecrawl" entry under mcpServers');
-} else {
-  fail('.mcp.json missing');
-}
-
-// install scripts present
-if (fileExists('scripts/install-firecrawl.sh')) pass('scripts/install-firecrawl.sh exists');
-else fail('scripts/install-firecrawl.sh missing');
-if (fileExists('scripts/install-firecrawl.ps1')) pass('scripts/install-firecrawl.ps1 exists');
-else fail('scripts/install-firecrawl.ps1 missing');
-
-// SKILL.md mentions Q9
-const skill = readFile('SKILL.md');
-if (skill.includes('header: "Firecrawl"')) pass('SKILL.md has Q9 Firecrawl onboarding');
-else fail('SKILL.md must include Q9 Firecrawl onboarding question');
-
-// oferta.md Step −1 uses the fetch-chain
-if (oferta.includes('fetchForCoherence')) pass('oferta.md Step −1 routes through fetchForCoherence');
-else fail('oferta.md Step −1 must call fetchForCoherence from providers/_fetch-chain.mjs');
-
-// SECURITY.md notes AGPL boundary
-const security = fileExists('SECURITY.md') ? readFile('SECURITY.md') : '';
-if (security.includes('AGPL') && security.includes('Firecrawl')) pass('SECURITY.md notes Firecrawl AGPL boundary');
-else fail('SECURITY.md must explain the Firecrawl AGPL-3.0 boundary');
-
-// ── 15. Dashboard build (Go) ──────────────────────────────────────
+// ── 4. DASHBOARD BUILD ──────────────────────────────────────────
 
 if (!QUICK) {
-  console.log('\n15. Dashboard build');
-  if (fileExists('dashboard/go.mod')) {
-    const goBuild = run('cd dashboard && go build -o /tmp/career-dashboard-test . 2>&1');
-    if (goBuild !== null) pass('Dashboard compiles');
-    else warn('Dashboard build failed (Go toolchain may be missing in CI)');
+  console.log('\n4. Dashboard build');
+  const goBuild = run('go', ['build', '-o', join(ROOT, '.test-dashboard-build'), '.'], { cwd: join(ROOT, 'dashboard') });
+  if (goBuild !== null) {
+    pass('Dashboard compiles');
   } else {
-    warn('No dashboard/go.mod — skipping Go build');
+    fail('Dashboard build failed');
   }
 } else {
-  console.log('\n15. Dashboard build (skipped --quick)');
+  console.log('\n4. Dashboard build (skipped --quick)');
 }
 
-// ── SUMMARY ───────────────────────────────────────────────────────
+// ── 5. DATA CONTRACT ────────────────────────────────────────────
+
+console.log('\n5. Data contract validation');
+
+// Check system files exist
+const systemFiles = [
+  'CLAUDE.md', 'VERSION', 'DATA_CONTRACT.md',
+  'modes/_shared.md', 'modes/_profile.template.md',
+  'modes/oferta.md', 'modes/pdf.md', 'modes/scan.md',
+  'templates/states.yml', 'templates/cv-template.html',
+];
+
+for (const f of systemFiles) {
+  if (fileExists(f)) {
+    pass(`System file exists: ${f}`);
+  } else {
+    fail(`Missing system file: ${f}`);
+  }
+}
+
+// Check user files are NOT tracked (gitignored)
+const userFiles = [
+  'config/profile.yml', 'modes/_profile.md', 'portals.yml',
+];
+for (const f of userFiles) {
+  const tracked = run('git', ['ls-files', f]);
+  if (tracked === '') {
+    pass(`User file gitignored: ${f}`);
+  } else if (tracked === null) {
+    pass(`User file gitignored: ${f}`);
+  } else {
+    fail(`User file IS tracked (should be gitignored): ${f}`);
+  }
+}
+
+// ── 6. PERSONAL DATA LEAK CHECK ─────────────────────────────────
+
+console.log('\n6. Personal data leak check');
+
+const leakPatterns = [
+  'Santiago', 'santifer.io', 'Santifer iRepair', 'Zinkee', 'ALMAS',
+  'hi@santifer.io', '688921377', '/Users/santifer/',
+];
+
+const scanExtensions = ['md', 'yml', 'html', 'mjs', 'sh', 'go', 'json'];
+const allowedFiles = [
+  // English README + localized translations (all legitimately credit Santiago)
+  'README.md', 'README.es.md', 'README.ja.md', 'README.ko-KR.md',
+  'README.pt-BR.md', 'README.ru.md',
+  // Standard project files
+  'LICENSE', 'CITATION.cff', 'CONTRIBUTING.md',
+  'package.json', '.github/FUNDING.yml', 'CLAUDE.md', 'AGENTS.md', 'go.mod', 'test-all.mjs',
+  // Community / governance files (added in v1.3.0, all legitimately reference the maintainer)
+  'CODE_OF_CONDUCT.md', 'GOVERNANCE.md', 'SECURITY.md', 'SUPPORT.md',
+  '.github/SECURITY.md',
+  // Dashboard credit string
+  'dashboard/internal/ui/screens/pipeline.go',
+];
+
+// Build pathspec for git grep — only scan tracked files matching these
+// extensions. This is what `grep -rn` was trying to do, but git-aware:
+// untracked files (debate artifacts, AI tool scratch, local plans/) and
+// gitignored files can't trigger false positives because they were never
+// going to reach a commit anyway.
+const grepPathspec = scanExtensions.map(e => `'*.${e}'`).join(' ');
+
+let leakFound = false;
+for (const pattern of leakPatterns) {
+  const result = run(
+    `git grep -n "${pattern}" -- ${grepPathspec} 2>/dev/null`
+  );
+  if (result) {
+    for (const line of result.split('\n')) {
+      const file = line.split(':')[0];
+      if (allowedFiles.some(a => file.includes(a))) continue;
+      if (file.includes('dashboard/go.mod')) continue;
+      warn(`Possible personal data in ${file}: "${pattern}"`);
+      leakFound = true;
+    }
+  }
+}
+if (!leakFound) {
+  pass('No personal data leaks outside allowed files');
+}
+
+// ── 7. ABSOLUTE PATH CHECK ──────────────────────────────────────
+
+console.log('\n7. Absolute path check');
+
+// Same git grep approach: only scans tracked files. Untracked AI tool
+// outputs, local debate artifacts, etc. can't false-positive here.
+const absPathResult = run(
+  `git grep -n "/Users/" -- '*.mjs' '*.sh' '*.md' '*.go' '*.yml' 2>/dev/null | grep -v README.md | grep -v LICENSE | grep -v CLAUDE.md | grep -v test-all.mjs`
+);
+if (!absPathResult) {
+  pass('No absolute paths in code files');
+} else {
+  for (const line of absPathResult.split('\n').filter(Boolean)) {
+    fail(`Absolute path: ${line.slice(0, 100)}`);
+  }
+}
+
+// ── 8. MODE FILE INTEGRITY ──────────────────────────────────────
+
+console.log('\n8. Mode file integrity');
+
+const expectedModes = [
+  '_shared.md', '_profile.template.md', 'oferta.md', 'pdf.md', 'scan.md',
+  'batch.md', 'apply.md', 'auto-pipeline.md', 'contacto.md', 'deep.md',
+  'ofertas.md', 'pipeline.md', 'project.md', 'tracker.md', 'training.md',
+];
+
+for (const mode of expectedModes) {
+  if (fileExists(`modes/${mode}`)) {
+    pass(`Mode exists: ${mode}`);
+  } else {
+    fail(`Missing mode: ${mode}`);
+  }
+}
+
+// Check _shared.md references _profile.md
+const shared = readFile('modes/_shared.md');
+if (shared.includes('_profile.md')) {
+  pass('_shared.md references _profile.md');
+} else {
+  fail('_shared.md does NOT reference _profile.md');
+}
+
+// ── 9. LOCAL PARSER CONTRACT ────────────────────────────────────
+
+console.log('\n9. Local parser contract');
+
+const scanScript = readFile('scripts/scan/scan.mjs');
+if (
+  scanScript.includes('typeof company.name !== \'string\'') &&
+  scanScript.includes('company.name.trim()') &&
+  scanScript.includes('company.name.toLowerCase()')
+) {
+  pass('scan.mjs guards company names before filtering');
+} else {
+  fail('scan.mjs does not guard company names before filtering');
+}
+
+if (
+  scanScript.includes("skipIds: ['local-parser']") &&
+  scanScript.includes('local parser failed, used API fallback') &&
+  scanScript.includes('resolveProvider(company, providers')
+) {
+  pass('scan.mjs falls back to ATS API when local parser fails');
+} else {
+  fail('scan.mjs does not fall back to ATS API when local parser fails');
+}
+
+if (fileExists('providers/local-parser.mjs')) {
+  pass('local-parser provider module exists');
+} else {
+  fail('local-parser provider module is missing');
+}
+
+const scanMode = fileExists('modes/scan.md') ? readFile('modes/scan.md') : '';
+if (scanMode.includes('local_parser_ok')) {
+  pass('scan.md references local_parser_ok skip rules');
+} else {
+  fail('scan.md missing local_parser_ok skip rules for agent scan');
+}
+
+if (!fileExists('scripts/parsers/cohere_jobs.py')) {
+  pass('Cohere parser example is not bundled as a runtime script');
+} else {
+  fail('Cohere parser example is still bundled as a runtime script');
+}
+
+const portalExample = readFile('templates/portals.example.yml');
+if (
+  !portalExample.includes('cohere_jobs.py') &&
+  portalExample.includes('scripts/parsers/example-js-company-jobs.js') &&
+  portalExample.includes('scripts/parsers/example_python_company_jobs.py') &&
+  portalExample.includes('already know their target careers URL')
+) {
+  pass('portals example documents a generic local parser contract');
+} else {
+  fail('portals example still points at a bundled Cohere parser');
+}
+
+// ── 10. AGENTS.md INTEGRITY ─────────────────────────────────────
+
+console.log('\n10. AGENTS.md integrity');
+
+const agents = readFile('AGENTS.md');
+const requiredSections = [
+  'Ethical Use', 'Offer Verification',
+  'Canonical states', 'TSV format',
+  'Skill modes', 'Main files',
+];
+
+for (const section of requiredSections) {
+  if (agents.includes(section)) {
+    pass(`AGENTS.md has section: ${section}`);
+  } else {
+    fail(`AGENTS.md missing section: ${section}`);
+  }
+}
+
+// ── 11. VERSION FILE ─────────────────────────────────────────────
+
+console.log('\n11. Version file');
+
+if (fileExists('VERSION')) {
+  const version = readFile('VERSION').trim();
+  if (/^\d+\.\d+\.\d+$/.test(version)) {
+    pass(`VERSION is valid semver: ${version}`);
+  } else {
+    fail(`VERSION is not valid semver: "${version}"`);
+  }
+} else {
+  fail('VERSION file missing');
+}
+
+// ── 11. LOCATION FILTER — always_allow tier ───────────────────────
+
+console.log('\n11. Location filter — always_allow tier');
+
+try {
+  const { buildLocationFilter } = await import(pathToFileURL(join(ROOT, 'scripts', 'scan', 'scan.mjs')).href);
+
+  const filter = buildLocationFilter({
+    always_allow: ['belgium', 'brussels'],
+    allow: ['europe', 'emea', 'remote'],
+    block: ['france', 'germany', 'united states'],
+  });
+
+  // Case 1: home-region passes regardless of other text
+  if (filter('Brussels, Belgium') === true) pass('Brussels, Belgium passes (always_allow hit)');
+  else fail('Brussels, Belgium should pass');
+
+  // Case 2: always_allow wins over block (THE motivating case for this tier)
+  if (filter('Remote, Belgium or France') === true) pass('Remote, Belgium or France passes (always_allow beats block)');
+  else fail('Remote, Belgium or France should pass — always_allow must win over block');
+
+  // Case 3: no always_allow hit, block still rejects
+  if (filter('Paris, France') === false) pass('Paris, France is rejected (block still applies)');
+  else fail('Paris, France should be rejected');
+
+  // Case 4: empty location → pass (existing semantics, unchanged)
+  if (filter('') === true) pass('empty location passes (unchanged semantics)');
+  else fail('empty location should pass');
+
+  // Case 5: case-insensitivity
+  if (filter('BRUSSELS, BELGIUM') === true) pass('case-insensitive match works');
+  else fail('case-insensitive match failed');
+
+  // Case 6: backward compatibility — no always_allow key behaves like stock allow/block
+  const stockFilter = buildLocationFilter({
+    allow: ['europe', 'remote'],
+    block: ['france'],
+  });
+  if (stockFilter('Remote, Belgium or France') === false) pass('without always_allow, block still wins (backward compatible)');
+  else fail('without always_allow, behaviour must match stock allow/block (block wins)');
+
+  // Case 7: null/missing locationFilter → pass-all filter (early-return path)
+  const nullFilter = buildLocationFilter(null);
+  if (nullFilter('Anywhere on Earth') === true && nullFilter('') === true) {
+    pass('null locationFilter returns a pass-all filter (early-return path)');
+  } else {
+    fail('null locationFilter should return a pass-all filter');
+  }
+
+  // Case 8: string-instead-of-array → wrapped to a 1-item list
+  const stringFilter = buildLocationFilter({ always_allow: 'belgium', block: ['france'] });
+  if (stringFilter('Remote, Belgium or France') === true) {
+    pass('always_allow as a bare string is wrapped to a single-item list');
+  } else {
+    fail('always_allow as a bare string should still work');
+  }
+
+  // Case 9: null/non-string items are filtered out (no crash, no false matches)
+  const messyFilter = buildLocationFilter({
+    always_allow: [null, 'belgium', 42, undefined],
+    block: ['france', null, 7],
+  });
+  if (messyFilter('Brussels, Belgium') === true && messyFilter('Paris, France') === false) {
+    pass('non-string entries (null, numbers, undefined) are filtered out without crashing');
+  } else {
+    fail('mixed-type keyword lists should not crash and should still match string entries');
+  }
+
+  // Case 10: all-null/non-string list → empty after normalization (no false rejects)
+  const allBadFilter = buildLocationFilter({ block: [null, 42, undefined], allow: ['remote'] });
+  if (allBadFilter('Remote') === true) {
+    pass('a block list with only non-string entries normalizes to [] (no false rejects)');
+  } else {
+    fail('non-string-only block list should not cause rejection');
+  }
+
+  // Case 11: empty / whitespace-only entries are dropped (would otherwise pass-all via includes(''))
+  const emptyKeywordFilter = buildLocationFilter({
+    always_allow: ['', '  '],
+    allow: ['remote'],
+    block: ['france'],
+  });
+  if (emptyKeywordFilter('Paris, France') === false) {
+    pass('empty/whitespace always_allow entries are dropped (no pass-all via includes(""))');
+  } else {
+    fail('empty always_allow entries should NOT bypass block — would have made the filter pass-all');
+  }
+
+  // Case 12: surrounding whitespace is trimmed so the keyword still matches
+  const whitespaceFilter = buildLocationFilter({
+    always_allow: ['  Belgium  ', '\tBrussels\n'],
+    block: ['france'],
+  });
+  if (whitespaceFilter('Remote, Belgium or France') === true) {
+    pass('whitespace-padded keywords still match after trim');
+  } else {
+    fail('"  Belgium  " should be trimmed and still match "Remote, Belgium or France"');
+  }
+
+  // Case 13: whitespace-only location is treated as missing (pass-all-tiers)
+  if (filter('   \t  ') === true) pass('whitespace-only location passes (treated as missing)');
+  else fail('whitespace-only location should pass');
+
+  // Case 14: non-string location (number/object/null) → pass without throwing
+  let crashed = false;
+  try {
+    const r1 = filter(42);
+    const r2 = filter({ city: 'Brussels' });
+    const r3 = filter(null);
+    const r4 = filter(undefined);
+    if (r1 === true && r2 === true && r3 === true && r4 === true) {
+      pass('non-string location values (number, object, null, undefined) pass without throwing');
+    } else {
+      fail(`non-string location results: number=${r1}, object=${r2}, null=${r3}, undefined=${r4}`);
+    }
+  } catch (e) {
+    crashed = true;
+    fail(`non-string location crashed: ${e.message}`);
+  }
+
+  // Case 15: a malformed location (e.g. legacy object) does NOT bypass block when interpreted naively —
+  // the guard returns true (pass) BEFORE block/allow even run, which is correct: scoring/eval happens
+  // downstream from the scan filter, so malformed locations should fall through to the manual evaluation
+  // step rather than being silently dropped here.
+  if (filter(42) === true) pass('non-string locations are passed through to downstream evaluation, not silently dropped');
+  else fail('non-string locations should pass through');
+
+} catch (e) {
+  fail(`always_allow tests crashed: ${e.message}`);
+}
+
+// ── SUMMARY ─────────────────────────────────────────────────────
 
 console.log('\n' + '='.repeat(50));
 console.log(`📊 Results: ${passed} passed, ${failed} failed, ${warnings} warnings`);

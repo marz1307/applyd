@@ -2,13 +2,13 @@
 
 Scan the configured job portals, filter by title relevance, and add new postings to the pipeline for downstream evaluation.
 
-> **Note (v1.6+):** The default scanner (`scripts/scan/scan.mjs` / `npm run scan`) is **zero-token** and uses structured sources: per-company local parsers and the public Greenhouse, Ashby, and Lever APIs. The Playwright / WebSearch levels described below are the **agent flow** (executed by Claude), not what `scripts/scan/scan.mjs` itself does. If a company has neither a local parser nor a Greenhouse/Ashby/Lever API, `scripts/scan/scan.mjs` will skip it; for those cases the agent should complete Level 1 (Playwright) or Level 3 (WebSearch) manually.
+> **Note (v1.6+):** The default scanner (`scripts/scan/scan.mjs` / `npm run scan`) is **zero-token** and uses structured sources: per-company local parsers and the public Greenhouse, Ashby, and Lever APIs. The browser-automation / web-search levels described below are the **agent flow** (executed by the coding agent), not what `scripts/scan/scan.mjs` itself does. If a company has neither a local parser nor a Greenhouse/Ashby/Lever API, `scripts/scan/scan.mjs` will skip it; for those cases the agent should complete Level 1 (browser) or Level 3 (search) manually.
 >
-> **Rule (v1.8+):** If a company's local parser succeeds at Level 0, the agent **must not** repeat it in Playwright (Level 1) or in API (Level 2). At Level 3, generic queries stay active but results from companies already covered by a local parser are discarded. See [Rule: successful local parser — don't repeat expensive scraping](#rule-successful-local-parser--dont-repeat-expensive-scraping).
+> **Rule (v1.8+):** If a company's local parser succeeds at Level 0, the agent **must not** repeat it in browser automation (Level 1) or in API (Level 2). At Level 3, generic queries stay active but results from companies already covered by a local parser are discarded. See [Rule: successful local parser — don't repeat expensive scraping](#rule-successful-local-parser--dont-repeat-expensive-scraping).
 
 ## Recommended execution
 
-Run as a subagent so it doesn't consume context from the main session:
+Run as a background subagent (if your agent supports it) so it doesn't consume context from the main session. Under Claude Code:
 
 ```
 Agent(
@@ -18,11 +18,13 @@ Agent(
 )
 ```
 
+Under other agents, use whatever equivalent is available (Codex sub-run, a separate terminal, `nohup`, …).
+
 ## Configuration
 
 Read `portals.yml`, which contains:
 
-- `search_queries`: list of WebSearch queries with `site:` filters per portal (broad discovery)
+- `search_queries`: list of web-search queries with `site:` filters per portal (broad discovery)
 - `tracked_companies`: specific companies with `careers_url` for direct navigation
 - `tracked_companies[].parser`: optional local parser for SSR or stable HTML pages
 - `title_filter`: positive / negative / seniority keywords for title filtering
@@ -97,21 +99,21 @@ During the agent's scan run, maintain a `local_parser_ok` set in memory — name
 
 | Level | If the company is in `local_parser_ok` |
 |-------|----------------------------------------|
-| **1 — Playwright** | **Skip** — no `browser_navigate` to its `careers_url` (most token-expensive method) |
-| **2 — API** | **Skip** — no WebFetch of its `api:` (already covered by parser; `scripts/scan/scan.mjs` also skips the API after a successful parser) |
-| **3 — WebSearch** | Run **generic** queries (`site:`, role titles); **discard** any hit whose normalised company name matches a `local_parser_ok` entry |
+| **1 — Browser** | **Skip** — no navigation to its `careers_url` (most token-expensive method) |
+| **2 — API** | **Skip** — no web fetch of its `api:` (already covered by parser; `scripts/scan/scan.mjs` also skips the API after a successful parser) |
+| **3 — Web search** | Run **generic** queries (`site:`, role titles); **discard** any hit whose normalised company name matches a `local_parser_ok` entry |
 
 **Exceptions:**
 
 - Parser **failed** → the company is **not** added to `local_parser_ok`; Levels 1 and 2 apply normally (same fallback rule `scripts/scan/scan.mjs` uses when the parser fails but an ATS API exists).
 - Level 3: do not disable cross-portal queries (`site:jobs.ashbyhq.com`, `site:boards.greenhouse.io`, etc.) — they discover **new** companies. Only filter out results from companies already in `tracked_companies` with a successful parser.
-- Do not create dedicated `search_queries` for a company with an active local parser (e.g. `site:jobs.ashbyhq.com/cohere "Analytics Engineer"`); use the parser, or if it fails, Playwright / API.
+- Do not create dedicated `search_queries` for a company with an active local parser (e.g. `site:jobs.ashbyhq.com/cohere "Analytics Engineer"`); use the parser, or if it fails, browser / API.
 
 **Recommended Level 0 start:** run `node scripts/scan/scan.mjs` (or `npm run scan`) at the start of the agent workflow. That covers local parsers and APIs in one zero-token pass and reports which companies were covered by `local-parser` successfully.
 
-### Level 1 — Playwright direct (PRIMARY)
+### Level 1 — Browser automation direct (PRIMARY)
 
-**For each company in `tracked_companies` not in `local_parser_ok`:** navigate to its `careers_url` with Playwright (`browser_navigate` + `browser_snapshot`), read all visible job listings, and extract title + URL for each. This is the most reliable method because:
+**For each company in `tracked_companies` not in `local_parser_ok`:** navigate to its `careers_url` with the agent's browser-automation tool (Claude: Playwright MCP `browser_navigate` + `browser_snapshot`; other agents: their equivalent), read all visible job listings, and extract title + URL for each. This is the most reliable method because:
 
 - It sees the page in real time (not cached Google results).
 - It works with SPAs (Ashby, Lever, Workday).
@@ -122,7 +124,7 @@ During the agent's scan run, maintain a `local_parser_ok` set in memory — name
 
 ### Level 2 — ATS APIs / feeds (COMPLEMENTARY)
 
-For companies with a public API or structured feed **not in `local_parser_ok`**, use the JSON/XML response as a fast complement to Level 1. Faster than Playwright and reduces visual-scraping errors.
+For companies with a public API or structured feed **not in `local_parser_ok`**, use the JSON/XML response as a fast complement to Level 1. Faster than browser automation and reduces visual-scraping errors.
 
 **Current support (variables in `{}`):**
 
@@ -141,7 +143,7 @@ For companies with a public API or structured feed **not in `local_parser_ok`**,
 - `lever`: root array `[]` → `text`, `hostedUrl` (fallback: `applyUrl`)
 - `teamtailor`: RSS items → `title`, `link`
 
-### Level 3 — WebSearch (BROAD DISCOVERY)
+### Level 3 — Web search (BROAD DISCOVERY)
 
 The `search_queries` with `site:` filters cover portals cross-sectionally (all Ashby companies, all Greenhouse companies, etc.). Useful to discover NEW companies not yet in `tracked_companies`, but the results can be stale. After filtering hits from `local_parser_ok` companies, the remaining results are deduplicated against Levels 0–2.
 
@@ -158,20 +160,20 @@ The levels are additive — they run in order, results merge and deduplicate. Co
    b. Run the script, capture stdout (timeout: 60s)
    c. If stdout is valid JSON and the script exited 0 → add company to `local_parser_ok`, accumulate the jobs
    d. If failure → log and fall through to Levels 1/2
-4. **Level 1 — Playwright** (for each company not in `local_parser_ok`):
-   a. `browser_navigate` to `careers_url`
-   b. `browser_snapshot`
+4. **Level 1 — Browser automation** (for each company not in `local_parser_ok`):
+   a. Navigate to `careers_url` (Claude: `browser_navigate`)
+   b. Snapshot the rendered page (Claude: `browser_snapshot`)
    c. Extract title + URL of every listing visible on the page
    d. Apply pagination if there's a "next page" button or infinite scroll
    e. Apply `title_filter.positive` AND `title_filter.negative` (case-insensitive)
    f. Apply `location_filter` (always_allow → allow → block; see `portals.yml` for the rules)
    g. Accumulate candidates (dedup with Level 1)
 5. **Level 2 — ATS APIs** (for companies with `api:` not in `local_parser_ok`):
-   a. WebFetch the API endpoint
+   a. Fetch the API endpoint (Claude: `WebFetch`; Codex: shell + curl)
    b. Parse per the provider table above
    c. Apply title + location filters
    d. Accumulate the rest (dedup with Levels 0+1+2)
-6. **Level 3 — WebSearch** (broad discovery):
+6. **Level 3 — Web search** (broad discovery):
    a. Run each query in `search_queries[]` where `enabled: true`
    b. Extract company + role + URL from each result
    c. Discard hits from companies in `local_parser_ok` (already covered)
@@ -192,9 +194,9 @@ Surface:
 Scan complete. Levels executed: 0+1+2+3.
 
   Local parsers run: N (M succeeded, K failed)
-  Playwright pages: P
+  Browser-automation pages: P
   API endpoints: A
-  WebSearch queries: W
+  Web-search queries: W
 
   Total raw hits: H
   After title filter: T
@@ -250,8 +252,8 @@ Fallback: if you only have the raw ATS URL, navigate to the company's website fi
 **If `careers_url` doesn't exist** for a company:
 
 1. Try the platform pattern above.
-2. If that fails, run a quick WebSearch: `"{company}" careers jobs`.
-3. Navigate with Playwright to confirm it works.
+2. If that fails, run a quick web search: `"{company}" careers jobs`.
+3. Navigate with your browser-automation tool to confirm it works.
 4. **Save the discovered URL to `portals.yml`** for future scans.
 
 **If `careers_url` returns 404 or redirect:**

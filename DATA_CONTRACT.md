@@ -18,14 +18,15 @@ These files contain your personal data, customizations, and work product. Update
 | `data/pipeline.md` | Your URL inbox |
 | `data/scan-history.tsv` | Your scan history |
 | `data/follow-ups.md` | Your follow-up history |
+| `data/uk-sponsor-register/*` | Your downloaded gov.uk Register of licensed sponsors (CSV) + the generated `index.json`. Point-in-time snapshot you re-download periodically; refresh with `node sponsor-check.mjs --rebuild`. |
 | `writing-samples/*` | Your personal writing samples for style calibration (except `writing-samples/README.md`, which is system-owned documentation delivered by updates) |
 | `reports/*` | Your evaluation reports |
 | `output/*` | Your generated PDFs |
 | `jds/*` | Your saved job descriptions |
+| `assets/candidate-photo.jpg` | Personal photo embedded in DE Lebenslauf PDFs |
 | `data/routine-logs/*` | Headless `claude -p` routine logs (gitignored, machine-generated) |
-| `data/wrapper-trace.log` | One-line-per-invocation trace from the scheduled-routine wrapper (gitignored) |
-| `data/scan-failures.json` | Per-company consecutive-failure ledger for scripts/scan/scan.mjs stale-portal detection (gitignored) |
-| `.env` | Local secrets — Notion token, Bright Data API key, etc. (gitignored) |
+| `data/wrapper-trace.log` | One-line-per-invocation trace from `routines/run-routine.ps1` (gitignored) |
+| `data/scan-failures.json` | Per-company consecutive-failure ledger for scan.mjs stale-portal detection (gitignored) |
 
 ## System Layer (safe to auto-update)
 
@@ -49,6 +50,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/training.md` | Training evaluation instructions |
 | `modes/patterns.md` | Pattern analysis instructions |
 | `modes/followup.md` | Follow-up cadence instructions |
+| `modes/<lang>/*` | Translated modes (user-created, e.g. `modes/de/` for DACH) |
 | `modes/notion-tracker.md` | Notion tracker contract spec |
 | `CLAUDE.md` | Agent instructions |
 | `AGENTS.md` | Shared agent instructions (included by CLAUDE.md) |
@@ -60,9 +62,11 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `templates/states.yml` | Canonical application states |
 | `fonts/*` | Self-hosted fonts |
 | `.mcp.json` | Project-level MCP server registration (Bright Data via `BRIGHTDATA_API_KEY`) |
-| `routines/*.md` | Self-completing prompts for headless `claude -p` (scans, pace checks) |
-| `scripts/test-scripts-smoke.mjs` | Regression smoke test for the core scripts |
-| `.claude/skills/career-ops/SKILL.md` | Marketplace skill manifest — drives `/career-ops` onboarding |
+| `routines/*.md` | Self-completing prompts for headless `claude -p` (morning/lunchtime scan, pace check) |
+| `routines/run-routine.ps1` | Windows Task Scheduler wrapper — validates output contract, enforces timeouts, per-routine MCP allowlists |
+| `test-pdf-smoke.mjs` | Regression smoke test for `generate-pdf-tailored.mjs` (EN + DE happy path) |
+| `.claude/skills/*` | Skill definitions (symlink → .agents/skills/) |
+| `.agents/skills/*` | Authoritative skill manifest |
 | `docs/*` | Documentation |
 | `DATA_CONTRACT.md` | This file |
 | `writing-samples/README.md` | System-owned onboarding documentation for the writing-samples directory |

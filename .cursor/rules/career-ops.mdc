@@ -1,0 +1,11 @@
+---
+description: career-ops project contract
+alwaysApply: true
+---
+See `AGENTS.md` for the full project rules.
+
+Cursor-specific:
+- Invoke a mode with `@modes/X.md` in chat.
+- Reference files with `@` prefix in composer.
+- MCP servers configured in `.cursor/mcp.json` (mirror `.mcp.json` shape).
+- For headless routines, set `CAREER_OPS_AGENT_CLI` and use `routines/run-routine.ps1` (Windows) — see `docs/AGENT_COMPAT.md`.

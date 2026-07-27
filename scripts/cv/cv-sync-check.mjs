@@ -11,11 +11,11 @@
  */
 
 import { readFileSync, existsSync, statSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const projectRoot = join(__dirname, '..', '..');
+const projectRoot = resolve(__dirname, '..', '..');
 
 const warnings = [];
 const errors = [];

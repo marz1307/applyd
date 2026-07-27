@@ -429,7 +429,7 @@ node generate-pdf.mjs \
 
 #### Step 5a — Notion write (PRIMARY)
 
-1. **Dedup.** Run `notion-search` on the Applications DB filtered by `Job URL = {{URL}}`. If a row exists → UPDATE; if not → INSERT against data source `fdc232c2-3c9b-4311-a80b-5f09698c3819`.
+1. **Dedup.** Run `notion-search` on the Applications DB filtered by `Job URL = {{URL}}`. If a row exists → UPDATE; if not → INSERT against the data source ID configured in `config/profile.yml → notion.data_source_id`.
 2. **Compute Match score (0–100):** multiply the 1–5 global score by 20. (Example: `4.5/5` → `90`.)
 3. **Compute Recruiter-sim verdict:** global ≥ 4.5 → `INVITE`; 3.5–4.4 → `MAYBE`; < 3.5 → `REJECT`.
 4. **Stage transition (HARD):**

@@ -7,7 +7,7 @@ Process job URLs stored in `data/pipeline.md`. The user adds URLs at any time an
 1. **Read** `data/pipeline.md` → search for `- [ ]` items in the "Pending" section
 2. **For each pending URL**:
    a. Calculate the next sequential `REPORT_NUM` (read `reports/`, take the highest number + 1)
-   b. **Extract JD** using Playwright (browser_navigate + browser_snapshot) → WebFetch → WebSearch
+   b. **Extract JD** using browser automation (preferred) → plain web fetch → web search. (Claude reference bindings: Playwright MCP `browser_navigate` + `browser_snapshot` → `WebFetch` → `WebSearch`.)
    c. If the URL is not accessible → mark as `- [!]` with a note and continue
    d. **Execute full auto-pipeline**: Evaluation A-F → Report .md → PDF (if score >= 3.0) → Tracker
    e. **Move from "Pending" to "Processed"**: `- [x] #NNN | URL | Company | Role | Score/5 | PDF ✅/❌`
@@ -33,13 +33,13 @@ Process job URLs stored in `data/pipeline.md`. The user adds URLs at any time an
 
 ## Intelligent JD detection from URL
 
-1. **Playwright (preferred):** `browser_navigate` + `browser_snapshot`. Works with all SPAs.
-2. **WebFetch (fallback):** For static pages or when Playwright is unavailable.
-3. **WebSearch (last resort):** Search in secondary portals that index the JD.
+1. **Browser automation (preferred):** navigate + snapshot the rendered page. Works with all SPAs. (Claude: Playwright MCP `browser_navigate` + `browser_snapshot`; other agents: their equivalent.)
+2. **Plain web fetch (fallback):** For static pages or when browser automation is unavailable. (Claude: `WebFetch`; Codex: shell + curl.)
+3. **Web search (last resort):** Search in secondary portals that index the JD.
 
 **Special cases:**
 - **LinkedIn**: May require login → mark `[!]` and ask the user to paste the text
-- **PDF**: If the URL points to a PDF, read it directly with the Read tool
+- **PDF**: If the URL points to a PDF, read it directly using the agent's file-read capability (Claude: `Read`; other agents: their equivalent).
 - **`local:` prefix**: Read the local file. Example: `local:jds/linkedin-pm-ai.md` → read `jds/linkedin-pm-ai.md`
 
 ## Automatic numbering

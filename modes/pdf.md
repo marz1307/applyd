@@ -99,13 +99,13 @@ When rendering via `scripts/cv/generate-pdf-tailored.mjs`, `--role-title "<title
 
 ### Step 11b — Optional: LLM QA pass
 
-If the Claude CLI is available, QA the rendered CV before accepting it (it runs on your Claude subscription via `claude -p` — no API key):
+If an agent CLI is available on `PATH` (default: `claude`; override via env — see `scripts/cv/cv-qa.mjs`), QA the rendered CV before accepting it. Under Claude Code it runs on the Claude subscription via `claude -p` (no API key); under other agents it uses the CLI you point it at:
 
 ```bash
 node scripts/cv/cv-qa.mjs --cv <cv.html> --jd-file <jd.txt> --company "<name>" --role-title "<title>"
 ```
 
-Exit 0 = pass, 2 = auto-patched, 3 = needs manual work. If the CLI is unavailable it prints a notice and skips (exit 0), and the Step 5 self-audit against `cv-quality-rules.md` remains the fallback.
+Exit 0 = pass, 2 = auto-patched, 3 = needs manual work. If no CLI is available it prints a notice and skips (exit 0), and the Step 5 self-audit against `cv-quality-rules.md` remains the fallback.
 
 ### Step 12 — Report
 

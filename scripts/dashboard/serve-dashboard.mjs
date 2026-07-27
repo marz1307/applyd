@@ -86,7 +86,7 @@ server.listen(PORT, () => {
 if (AUTO_REBUILD) {
   const rebuild = () => {
     console.log(`[${new Date().toISOString()}] Rebuilding dashboard…`);
-    const proc = spawn("node", ["build-dashboard.mjs"], {
+    const proc = spawn("node", ["scripts/dashboard/build-dashboard.mjs"], {
       cwd: ROOT,
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],

@@ -24,17 +24,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
-        with:
-          languages: ${{ matrix.language }}
-
+      # Install toolchains BEFORE codeql-action/init so CodeQL sees the
+      # runtime it needs to analyse. Installing after init produces the
+      # "Go was installed after codeql-action/init" warning and can
+      # partially miss the language.
       - name: Setup Go
         if: matrix.language == 'go'
         uses: actions/setup-go@v6
         with:
           go-version-file: dashboard/go.mod
           cache-dependency-path: dashboard/go.sum
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
 
       - name: Build Go
         if: matrix.language == 'go'

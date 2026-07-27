@@ -1,6 +1,6 @@
 # Mode: deep — Deep Research Prompt
 
-Generate a structured prompt for Perplexity/Claude/ChatGPT with 6 axes:
+Generate a structured prompt for a research LLM (Perplexity, Claude, ChatGPT, Gemini, …) with 6 axes:
 
 ```text
 ## Deep Research: [Company] — [Role]

@@ -60,7 +60,11 @@ const CFG = loadConfig();
 // /v1/databases/{id}/query expects the *database* UUID, NOT the data-source UUID.
 // In this workspace they are different (see config/profile.yml notes). Falling
 // back on a hardcoded database ID, not the data-source ID.
-const DATABASE_ID = (CFG.notion && CFG.notion.applications_database_id) || "eace68a2-e454-4a6d-ab9d-ed5dfcd65c72";
+const DATABASE_ID = process.env.NOTION_DATABASE_ID || (CFG.notion && CFG.notion.applications_database_id);
+if (!DATABASE_ID) {
+  console.error("ROUTINE_ABORT: No Notion database ID configured — set NOTION_DATABASE_ID env var or notion.applications_database_id in config/profile.yml");
+  process.exit(5);
+}
 
 const ENDPOINT = `https://api.notion.com/v1/databases/${DATABASE_ID}/query`;
 

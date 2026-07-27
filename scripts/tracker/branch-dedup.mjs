@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 /**
- * branch-dedup.mjs — one application per (company, city) branch
+ * branch-dedup.mjs — one application per (company, city, role) branch
  *
- * Why: applying to 3 roles at the same Berlin SAP office reads as
- * scattershot to recruiters. We keep ONLY the highest-scoring row per
- * (company, city) and archive (Notion Trash, recoverable 30 days) the
- * rest — they never appear in the queue again.
+ * Why: applying to the SAME role at the same Berlin SAP office via two
+ * portals reads as scattershot. We keep ONLY the highest-scoring row per
+ * (company, city, role) and archive (Notion Trash, recoverable 30 days)
+ * the rest — they never appear in the queue again. Genuinely DIFFERENT
+ * roles at the same company+city (e.g. home24 Berlin Data Scientist vs
+ * Junior Data Engineer) are distinct branches and BOTH survive.
  *
- * Grouping key: (normalised_company, city). Different cities of the
- * same company are treated as different branches (Berlin SAP ≠ Walldorf
- * SAP), since they're often run as separate hiring units.
+ * Grouping key: (normalised_company, city, normRole). Different cities of
+ * the same company are different branches (Berlin SAP ≠ Walldorf SAP), and
+ * different roles are different branches too. Withdrew / Not pursuing /
+ * Applied are out of scope (only Stage 2 + Stage 3 are considered), so an
+ * expired sibling never suppresses a live application.
  *
  * Winner selection within a group:
  *   1. Highest Match score
@@ -53,8 +57,12 @@ function loadConfig() {
   try { return yaml.load(readFileSync(path, "utf8")) || {}; } catch { return {}; }
 }
 const CFG = loadConfig();
-const DATABASE_ID = (CFG.notion && CFG.notion.applications_database_id)
-  || "eace68a2-e454-4a6d-ab9d-ed5dfcd65c72";
+const DATABASE_ID = process.env.NOTION_DATABASE_ID
+  || (CFG.notion && CFG.notion.applications_database_id);
+if (!DATABASE_ID) {
+  console.error("ROUTINE_ABORT: No Notion database ID configured — set NOTION_DATABASE_ID env var or notion.applications_database_id in config/profile.yml");
+  process.exit(5);
+}
 const ENDPOINT = `https://api.notion.com/v1/databases/${DATABASE_ID}/query`;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -147,6 +155,14 @@ function remoteTier(locationText, positionTags) {
   return 0;
 }
 
+// Normalised role key from the Position multi-select. Genuinely different roles
+// at the same company+city stay SEPARATE branches (both survive); the same role
+// posted across portals (same tags) still collapses. Empty position -> "any".
+function normRole(positionTags) {
+  if (!positionTags || !positionTags.length) return "any";
+  return positionTags.map((s) => String(s).toLowerCase().trim()).filter(Boolean).sort().join("+");
+}
+
 async function archivePage(pageId) {
   // Notion API: PATCH /v1/pages/{id} with { archived: true } moves
   // the page to Trash (recoverable for 30 days).
@@ -168,7 +184,8 @@ const filter = {
 
 const pages = await queryAll(filter);
 
-// Build groups keyed by (normCompany, normCity)
+// Build groups keyed by (normCompany, normCity, normRole) — different roles at
+// the same company+city are distinct branches and both survive.
 const groups = new Map();
 for (const p of pages) {
   const company    = getProp(p, "Company", "title") || getProp(p, "Company", "rich_text");
@@ -180,7 +197,7 @@ for (const p of pages) {
   const fitNotes   = getProp(p, "Fit notes", "rich_text");
   const appId      = getProp(p, "App ID", "rich_text") || p.id.slice(-8);
 
-  const key = `${normCompany(company)}|${normCity(location, country)}`;
+  const key = `${normCompany(company)}|${normCity(location, country)}|${normRole(position)}`;
   if (!groups.has(key)) groups.set(key, []);
   groups.get(key).push({
     pageId: p.id,
