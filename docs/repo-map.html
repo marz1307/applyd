@@ -1,0 +1,665 @@
+<!--
+  career-ops repo mind map — single-file, no dependencies, works from file://.
+
+  UPDATE DISCIPLINE (rule in AGENTS.md → Stack and Conventions): whenever the
+  repo's structure changes — a script added/removed/renamed, an import edge or
+  data flow changed, a routine or mode added — edit the N (nodes) and E (edges)
+  arrays below in the same session. Content-only edits (CV wording, config
+  values, report text) do not require a map update; anything a fresh session
+  needs in order to navigate the codebase does.
+-->
+<title>career-ops — Architecture Map</title>
+<style>
+:root{
+  --bg:#edf0f4;--surface:#fff;--border:#cdd3db;
+  --text:#1e2a36;--text-2:#5a6778;--text-3:#94a0ad;
+  --shadow:rgba(0,0,0,.08);--glow:rgba(0,0,0,.04);
+  --c-pipeline:#7484948a;
+}
+@media(prefers-color-scheme:dark){:root{
+  --bg:#0b0f16;--surface:#131a24;--border:#1e2a38;
+  --text:#c0cad6;--text-2:#556474;--text-3:#2e3e50;
+  --shadow:rgba(0,0,0,.4);--glow:rgba(255,255,255,.03);
+  --c-pipeline:#8a9aac8a;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b0f16;--surface:#131a24;--border:#1e2a38;
+  --text:#c0cad6;--text-2:#556474;--text-3:#2e3e50;
+  --shadow:rgba(0,0,0,.4);--glow:rgba(255,255,255,.03);
+  --c-pipeline:#8a9aac8a;
+}
+:root[data-theme="light"]{
+  --bg:#edf0f4;--surface:#fff;--border:#cdd3db;
+  --text:#1e2a36;--text-2:#5a6778;--text-3:#94a0ad;
+  --shadow:rgba(0,0,0,.08);--glow:rgba(0,0,0,.04);
+  --c-pipeline:#7484948a;
+}
+*{margin:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;height:100vh;overflow:hidden}
+header{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--surface);z-index:2;flex-wrap:wrap}
+header h1{font-size:14px;font-weight:700;letter-spacing:.02em;white-space:nowrap;opacity:.7}
+#search{flex:0 1 220px;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:12px ui-monospace,'Cascadia Code','SF Mono',monospace;outline:none}
+#search:focus{border-color:var(--text-2)}
+#search::placeholder{color:var(--text-3)}
+#filters{display:flex;gap:4px;flex-wrap:wrap}
+.fbtn{display:flex;align-items:center;gap:5px;padding:3px 10px;border:1px solid var(--border);border-radius:12px;background:transparent;color:var(--text-2);font:11px system-ui;cursor:pointer;transition:opacity .15s}
+.fbtn .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.fbtn.off{opacity:.3}
+.fbtn:hover{opacity:1;border-color:var(--text-3)}
+#hint{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);padding:6px 14px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--text-2);font-size:11px;z-index:3;pointer-events:none;opacity:1;transition:opacity .8s}
+#hint.gone{opacity:0}
+main{flex:1;position:relative;overflow:hidden}
+canvas{display:block;width:100%;height:100%;cursor:grab}
+canvas.dragging{cursor:grabbing}
+#panel{position:absolute;top:0;right:0;bottom:0;width:min(340px,90vw);background:var(--surface);border-left:1px solid var(--border);box-shadow:-4px 0 20px var(--shadow);transform:translateX(100%);transition:transform .2s ease;z-index:4;overflow-y:auto;padding:20px 18px 30px}
+#panel.open{transform:translateX(0)}
+#panel .close{position:absolute;top:10px;right:12px;background:none;border:none;color:var(--text-2);font-size:20px;cursor:pointer;line-height:1;padding:4px}
+#panel .close:hover{color:var(--text)}
+#panel h2{font:600 15px/1.3 ui-monospace,'Cascadia Code',monospace;margin:0 0 6px;padding-right:30px;word-break:break-all}
+#panel .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;margin-bottom:10px}
+#panel .desc{font-size:13px;color:var(--text-2);line-height:1.5;margin-bottom:14px}
+#panel .path-row{font:12px/1.4 ui-monospace,'Cascadia Code',monospace;color:var(--text-2);padding:8px 10px;background:var(--bg);border-radius:6px;margin-bottom:16px;word-break:break-all}
+#panel .conn-group{margin-bottom:12px}
+#panel .conn-label{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-bottom:4px}
+#panel .conn-item{font:12px/1.6 ui-monospace,'Cascadia Code',monospace;cursor:pointer;padding:1px 0}
+#panel .conn-item:hover{color:var(--text);text-decoration:underline}
+.edge-legend{display:flex;gap:10px;align-items:center;margin-left:auto;flex-wrap:wrap}
+.edge-legend span{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--text-3)}
+.edge-legend .line{width:18px;height:0;border-top:2px solid var(--text-3)}
+.edge-legend .line.dashed{border-top-style:dashed}
+.edge-legend .line.dotted{border-top-style:dotted}
+.edge-legend .line.thick{border-top-width:3px}
+@media(max-width:640px){
+  #search{flex:1 1 140px}
+  .edge-legend{display:none}
+  header h1{display:none}
+}
+</style>
+
+<header>
+  <h1>career-ops</h1>
+  <input id="search" placeholder="Search files…  (/ to focus)" spellcheck="false">
+  <div id="filters"></div>
+  <div class="edge-legend">
+    <span><span class="line thick"></span>pipeline</span>
+    <span><span class="line"></span>import</span>
+    <span><span class="line dashed"></span>data</span>
+    <span><span class="line dotted"></span>routine</span>
+  </div>
+</header>
+<main>
+  <canvas id="c"></canvas>
+  <div id="hint">Scroll to zoom · Drag to pan · Click a node for details · Press <b>/</b> to search</div>
+  <div id="panel">
+    <button class="close" id="close-panel">&times;</button>
+    <div id="panel-body"></div>
+  </div>
+</main>
+
+<script>
+const CATS={
+  pipeline:{label:'Pipeline',dark:'#8a9aac',light:'#6a7a8a'},
+  entry:   {label:'Entry',   dark:'#e07a9c',light:'#b04a70'},
+  ingest:  {label:'Ingest',  dark:'#d4a84e',light:'#a6832e'},
+  build:   {label:'Build',   dark:'#5b8fd9',light:'#3d6fb0'},
+  data:    {label:'Data',    dark:'#4eba8c',light:'#2e8a66'},
+  auto:    {label:'Routines',dark:'#9b7fd4',light:'#7660a8'},
+  infra:   {label:'Infra',   dark:'#d4825e',light:'#a86040'},
+};
+
+function catColor(k){
+  const dt=document.documentElement.dataset.theme;
+  const dark=dt==='dark'||(dt!=='light'&&matchMedia('(prefers-color-scheme:dark)').matches);
+  return dark?CATS[k].dark:CATS[k].light;
+}
+
+const N=[
+  // ── Pipeline stages ──────────────────────────────────────────────
+  {id:'s1',l:'1. Discovered',c:'pipeline',d:'New posting found by scanners; written to Notion at Stage 1 (or applications.md if Notion is not wired)'},
+  {id:'s2',l:'2. Triaged',c:'pipeline',d:'A–G evaluation scored ≥ triage.score_floor (default 70) → promoted here; below → Not pursuing'},
+  {id:'s3',l:'3. Drafted',c:'pipeline',d:'Tailored CV + cover letter generated and attached; QA agent (cv-qa) may patch verbatim fixes'},
+  {id:'s4',l:'4. Applied',c:'pipeline',d:'Candidate submitted the application. The agent NEVER auto-submits; this transition is always human-made'},
+  {id:'s5',l:'5–9. Interviews',c:'pipeline',d:'Assessment → Phone → Tech → Onsite → Offer → Signed (interview-prep mode assembles a per-company pack)'},
+
+  // ── Entry points: one primary contract, one overlay per agent ────
+  {id:'ag',l:'AGENTS.md',c:'entry',d:'Primary agent-neutral project contract. Every overlay file (CLAUDE.md, GEMINI.md, .cursor/rules, .aider.conf.yml) layers on top of this.',p:'AGENTS.md'},
+  {id:'rd',l:'README.md',c:'entry',d:'Public-facing quickstart: install, first-run, mode routing table',p:'README.md'},
+  {id:'mn',l:'MANUAL.md',c:'entry',d:'Long-form user manual: full mode catalogue, config reference, troubleshooting',p:'MANUAL.md'},
+  {id:'sk',l:'SKILL.md',c:'entry',d:'Claude Code plugin/skill manifest that exposes the /career-ops slash command',p:'SKILL.md'},
+  {id:'dc',l:'DATA_CONTRACT.md',c:'entry',d:'User layer vs system layer boundary — which files are safe to auto-update vs. must be preserved',p:'DATA_CONTRACT.md'},
+  {id:'cl',l:'CLAUDE.md',c:'entry',d:'Claude Code overlay: tool bindings (WebFetch/Grep/Read/Skill), MCP config, headless claude -p gotchas',p:'CLAUDE.md'},
+  {id:'gm',l:'GEMINI.md',c:'entry',d:'Gemini CLI overlay: @-include mode invocation + adapter pointer',p:'GEMINI.md'},
+  {id:'cr',l:'.cursor/rules/',c:'entry',d:'Cursor overlay: alwaysApply project rule pointing back to AGENTS.md',p:'.cursor/rules/career-ops.mdc'},
+  {id:'ai',l:'.aider.conf.yml',c:'entry',d:'Aider overlay: auto-reads AGENTS.md + _shared + _profile.template on start',p:'.aider.conf.yml'},
+
+  // ── Modes (by phase) ─────────────────────────────────────────────
+  {id:'m_scan',l:'scan.md',c:'build',d:'Portal scanner mode — invokes scripts/scan/scan.mjs (ATS APIs) and bd-bulk-scan.mjs (SERP)',p:'modes/scan.md'},
+  {id:'m_pipe',l:'pipeline.md',c:'build',d:'Process URL inbox at data/pipeline.md — dispatch each URL through oferta',p:'modes/pipeline.md'},
+  {id:'m_auto',l:'auto-pipeline.md',c:'build',d:'One-shot pipeline: fetch → evaluate → report → PDF → tracker for a single URL',p:'modes/auto-pipeline.md'},
+  {id:'m_of',l:'oferta.md',c:'build',d:'Single-offer A–G evaluation (Blocks A–F + G posting legitimacy)',p:'modes/oferta.md'},
+  {id:'m_ofs',l:'ofertas.md',c:'build',d:'Multi-offer comparison mode (rank several evaluated postings)',p:'modes/ofertas.md'},
+  {id:'m_batch',l:'batch.md',c:'build',d:'Batch dispatcher — headless workers over batch/batch-prompt.md',p:'modes/batch.md'},
+  {id:'m_pdf',l:'pdf.md',c:'build',d:'Tailored CV PDF generation — invokes scripts/cv/generate-pdf-tailored.mjs',p:'modes/pdf.md'},
+  {id:'m_ltx',l:'latex.md',c:'build',d:'LaTeX/Overleaf CV variant — invokes scripts/cv/generate-latex.mjs',p:'modes/latex.md'},
+  {id:'m_cvqr',l:'cv-quality-rules.md',c:'build',d:'Deterministic CV/CL quality rulebook read by cv-qa.mjs and caveats-audit.mjs',p:'modes/cv-quality-rules.md'},
+  {id:'m_apply',l:'apply.md',c:'build',d:'Application-form filler. Fills answers + attaches PDFs; STOPS before Submit — human always approves',p:'modes/apply.md'},
+  {id:'m_con',l:'contacto.md',c:'build',d:'LinkedIn / warm-path outreach drafts',p:'modes/contacto.md'},
+  {id:'m_ip',l:'interview-prep.md',c:'build',d:'6-doc interview pack: company intel, likely Qs, STAR mapping, tech drill, Qs-to-ask, comp prep',p:'modes/interview-prep.md'},
+  {id:'m_rt',l:'response-tracker.md',c:'build',d:'Log recruiter/company replies onto the applications row',p:'modes/response-tracker.md'},
+  {id:'m_tr',l:'tracker.md',c:'build',d:'Query the tracker: application status, counts, per-stage breakdown',p:'modes/tracker.md'},
+  {id:'m_fu',l:'followup.md',c:'build',d:'Follow-up cadence view — invokes followup-cadence.mjs',p:'modes/followup.md'},
+  {id:'m_pat',l:'patterns.md',c:'build',d:'Rejection / response pattern review — invokes analyze-patterns.mjs',p:'modes/patterns.md'},
+  {id:'m_deep',l:'deep.md',c:'build',d:'Company deep-dive research (people, product, funding, culture)',p:'modes/deep.md'},
+  {id:'m_prj',l:'project.md',c:'build',d:'Portfolio-project evaluation (should this go on the CV?)',p:'modes/project.md'},
+  {id:'m_trn',l:'training.md',c:'build',d:'Course / cert ROI evaluation',p:'modes/training.md'},
+  {id:'m_nt',l:'notion-tracker.md',c:'build',d:'Notion Applications DB contract: stage taxonomy, dedup, score floor, batch tag',p:'modes/notion-tracker.md'},
+
+  // ── System defaults + user override (data) ───────────────────────
+  {id:'_sh',l:'_shared.md',c:'data',d:'System-defaults mode read first by every other mode (scoring rubric, tool routing, ethics)',p:'modes/_shared.md'},
+  {id:'_pr',l:'_profile.template',c:'data',d:'Template copied to modes/_profile.md on first run — carries archetypes, scoring weights, seniority band. Overrides _shared.md.',p:'modes/_profile.template.md'},
+
+  // ── Config + templates ───────────────────────────────────────────
+  {id:'prof',l:'profile.yml',c:'data',d:'Single source of truth: identity, comp, pace targets, Notion DB IDs, language, work_eligibility. Onboarding copies profile.example.yml here.',p:'config/profile.yml'},
+  {id:'port',l:'portals.yml',c:'data',d:'Portal scanner config: tracked companies, provider bindings, title/location filters. Copied from templates/portals.example.yml on first run.',p:'portals.yml'},
+  {id:'tax',l:'role-taxonomy.yml',c:'data',d:'Optional archetype → role-title mapping used by scan filters when present',p:'config/role-taxonomy.yml'},
+  {id:'sty',l:'states.yml',c:'data',d:'Canonical application-state vocabulary + aliases. Pinned to metrics-core by its test suite.',p:'templates/states.yml'},
+  {id:'mcp',l:'.mcp.json',c:'data',d:'Project MCP servers (brightdata, firecrawl). Loaded by Claude Code and mirrored into other agents.',p:'.mcp.json'},
+  {id:'ver',l:'VERSION',c:'data',d:'Release version string read by doctor / dashboard',p:'VERSION'},
+  {id:'tpl',l:'cv-template.html',c:'data',d:'CV HTML template rendered by generate-pdf / generate-pdf-tailored',p:'templates/cv-template.html'},
+
+  // ── Candidate content (data) ─────────────────────────────────────
+  {id:'cvm',l:'cv.md',c:'data',d:'Canonical CV markdown (single source of truth for CV content)',p:'cv.md'},
+  {id:'dig',l:'article-digest.md',c:'data',d:'Deep proof points beyond the one-page CV — full project inventory, MCP/skills/eval-spec evidence',p:'article-digest.md'},
+  {id:'sb',l:'story-bank.md',c:'data',d:'Accumulated STAR+R stories, appended to by every Block F evaluation',p:'interview-prep/story-bank.md'},
+  {id:'amd',l:'applications.md',c:'data',d:'Local tracker cache (parallel to Notion). Merged from batch/tracker-additions/*.tsv.',p:'data/applications.md'},
+  {id:'pmd',l:'pipeline.md',c:'data',d:'URL inbox of pending job postings to evaluate',p:'data/pipeline.md'},
+  {id:'sht',l:'scan-history.tsv',c:'data',d:'Scanner dedup history (URL, company, date)',p:'data/scan-history.tsv'},
+  {id:'djn',l:'dashboard.json',c:'data',d:'Notion snapshot + funnel + calibration KPIs, refreshed by build-dashboard.mjs',p:'data/dashboard.json'},
+  {id:'not',l:'Notion (external)',c:'data',d:'Optional Notion Applications DB — system of record when NOTION_TOKEN is set. Contract in modes/notion-tracker.md.'},
+
+  // ── Providers (ingest) ───────────────────────────────────────────
+  {id:'prov',l:'providers/',c:'ingest',d:'ATS provider plugins: Ashby, Greenhouse, Lever, SmartRecruiters, Firecrawl fallback, local HTML parser',p:'providers/'},
+
+  // ── Scan scripts (ingest) ────────────────────────────────────────
+  {id:'scan',l:'scan.mjs',c:'ingest',d:'Zero-token ATS API scanner (Greenhouse / Ashby / Lever / SmartRecruiters / Workable)',p:'scripts/scan/scan.mjs'},
+  {id:'bd',l:'bd-bulk-scan.mjs',c:'ingest',d:'Bright Data SERP high-volume scraper for portals without a public ATS endpoint',p:'scripts/scan/bd-bulk-scan.mjs'},
+  {id:'bdr',l:'bd-referral-scout.mjs',c:'ingest',d:'Bright Data cold public-profile discovery for Stage-3 rows with no warm path',p:'scripts/scan/bd-referral-scout.mjs'},
+  {id:'rsr',l:'referral-scout-run.mjs',c:'ingest',d:'Layer-1 affiliation-first warm-path planner (pure logic; no browsing)',p:'scripts/scan/referral-scout-run.mjs'},
+  {id:'cpd',l:'cross-portal-dedup.mjs',c:'ingest',d:'Dedup identical postings that leak into multiple portals',p:'scripts/scan/cross-portal-dedup.mjs'},
+  {id:'wttj',l:'wttj-sitemap-refresh.mjs',c:'ingest',d:'Welcome to the Jungle sitemap parser → candidate URLs for bd-bulk-scan',p:'scripts/scan/wttj-sitemap-refresh.mjs'},
+  {id:'live',l:'check-liveness.mjs',c:'ingest',d:'Verify a posting is still open (uses liveness-core + optional headless browser)',p:'scripts/scan/check-liveness.mjs'},
+  {id:'sp',l:'sponsor-check.mjs',c:'ingest',d:'UK licensed-sponsor register lookup (fuzzy matching against gov.uk snapshot)',p:'scripts/scan/sponsor-check.mjs'},
+  {id:'rtx',l:'role-taxonomy.mjs',c:'ingest',d:'Optional archetype filter loaded by scan.mjs when role-taxonomy.yml exists',p:'scripts/scan/role-taxonomy.mjs'},
+
+  // ── CV build scripts (build) ─────────────────────────────────────
+  {id:'gpdf',l:'generate-pdf.mjs',c:'build',d:'Base CV PDF renderer (untailored)',p:'scripts/cv/generate-pdf.mjs'},
+  {id:'gpdft',l:'generate-pdf-tailored.mjs',c:'build',d:'JD-tailored CV PDF renderer — swaps summary, projects, headline title',p:'scripts/cv/generate-pdf-tailored.mjs'},
+  {id:'glat',l:'generate-latex.mjs',c:'build',d:'LaTeX/pdflatex CV variant (Overleaf-friendly)',p:'scripts/cv/generate-latex.mjs'},
+  {id:'h2p',l:'html-to-pdf.mjs',c:'build',d:'Shared Playwright Chromium HTML → PDF utility',p:'scripts/cv/html-to-pdf.mjs'},
+  {id:'jdt',l:'jd-role-title.mjs',c:'build',d:'Extract the JD-verbatim advertised role title (used in tailored header)',p:'scripts/cv/jd-role-title.mjs'},
+  {id:'qa',l:'cv-qa.mjs',c:'build',d:'LLM-powered post-draft QA against JD + cv-quality-rules.md. Auto-patches verbatim fixes; skips gracefully if no CLI.',p:'scripts/cv/cv-qa.mjs'},
+  {id:'weval',l:'writing-eval.mjs',c:'build',d:'Deterministic pre-Notion writing QA (language mismatch, banned vocabulary, format checks)',p:'scripts/cv/writing-eval.mjs'},
+  {id:'csc',l:'cv-sync-check.mjs',c:'build',d:'Cross-check that cv.md matches config/profile.yml identity fields',p:'scripts/cv/cv-sync-check.mjs'},
+
+  // ── Cover-letter build scripts (build) ───────────────────────────
+  {id:'clg',l:'generate.js',c:'build',d:'Cover-letter orchestrator: router → research → match → draft → render',p:'scripts/cover-letters/generate.js'},
+  {id:'clr',l:'router.js',c:'build',d:'Deterministic market routing (anglo_full / din5008_de / din5008_en)',p:'scripts/cover-letters/lib/router.js'},
+  {id:'cls',l:'research.js',c:'build',d:'JD fetch + concrete-fact extraction (Firecrawl / plain fetch fallback; no LLM)',p:'scripts/cover-letters/lib/research.js'},
+  {id:'cld',l:'draft-v2.js',c:'build',d:'Market-routed letter drafter (5-paragraph spine, eligibility routing)',p:'scripts/cover-letters/lib/draft-v2.js'},
+  {id:'clf',l:'form-drafter.js',c:'build',d:'Application-form answers drafter (visa routing, Q&A body, YAML frontmatter)',p:'scripts/cover-letters/lib/form-drafter.js'},
+  {id:'dinr',l:'din-render.mjs',c:'build',d:'DIN 5008-compliant German business-letter renderer',p:'scripts/cover-letters/lib/din-render.mjs'},
+
+  // ── Metrics semantic layer (infra) ───────────────────────────────
+  {id:'mc',l:'metrics-core.mjs',c:'infra',d:'SEMANTIC LAYER — one definition of applied / responded / screened / ghosted, status aliases, funnel math, score-band calibration. All metric consumers import from here; never redefine locally.',p:'scripts/metrics/metrics-core.mjs'},
+  {id:'fm',l:'funnel-metrics.mjs',c:'infra',d:'Outcome KPIs from Notion: response/screen/rejection rates by portal / country / referral / sponsorship',p:'scripts/metrics/funnel-metrics.mjs'},
+  {id:'ap',l:'analyze-patterns.mjs',c:'infra',d:'Rejection pattern detector over the local tracker + reports (honest outcome classifier)',p:'scripts/metrics/analyze-patterns.mjs'},
+  {id:'pa',l:'pace-alarm.mjs',c:'infra',d:'Rolling 7-day apply pace vs. pace.target_per_week (window-adherence %)',p:'scripts/metrics/pace-alarm.mjs'},
+  {id:'aw',l:'apply-window.mjs',c:'infra',d:'Timing gate that decides send / hold / send-now-fast / skip-stale for a candidate URL',p:'scripts/metrics/apply-window.mjs'},
+  {id:'fc',l:'followup-cadence.mjs',c:'infra',d:'Follow-up cadence calculator: flags overdue applications, suggests next-touch timing',p:'scripts/metrics/followup-cadence.mjs'},
+  {id:'cvta',l:'caveats-audit.mjs',c:'infra',d:'Zero-LLM lint over generated CVs / cover letters for cv-quality-rules.md violations',p:'scripts/metrics/caveats-audit.mjs'},
+
+  // ── Notion + tracker + dashboard (infra) ─────────────────────────
+  {id:'nq',l:'notion-query.mjs',c:'infra',d:'Paginated Notion REST query for Applications DB',p:'scripts/notion/notion-query.mjs'},
+  {id:'ne',l:'notion-eval-write.mjs',c:'infra',d:'Write A–G eval results (score, verdict, fit notes) to a Notion row',p:'scripts/notion/notion-eval-write.mjs'},
+  {id:'nd',l:'notion-draft-write.mjs',c:'infra',d:'Write Stage-3 draft properties (variant, run ID) to a Notion row',p:'scripts/notion/notion-draft-write.mjs'},
+  {id:'nu',l:'notion-upload-file.mjs',c:'infra',d:'3-step file upload to a Notion page property (Resume, Cover Letter)',p:'scripts/notion/notion-upload-file.mjs'},
+  {id:'nds',l:'notion-dashboard.mjs',c:'infra',d:'One-shot Notion DB setup / integrity check (npm run notion:setup / :check)',p:'scripts/notion/notion-dashboard.mjs'},
+  {id:'mrg',l:'merge-tracker.mjs',c:'infra',d:'Merge batch/tracker-additions/*.tsv into applications.md (handles the status↔score column swap)',p:'scripts/tracker/merge-tracker.mjs'},
+  {id:'vp',l:'verify-pipeline.mjs',c:'infra',d:'Tracker health check: canonical statuses, duplicate rows, report links',p:'scripts/tracker/verify-pipeline.mjs'},
+  {id:'bd2',l:'build-dashboard.mjs',c:'infra',d:'Snapshot Notion state into dashboard.json + HTML (funnel + calibration KPIs)',p:'scripts/dashboard/build-dashboard.mjs'},
+  {id:'doc',l:'doctor.mjs',c:'infra',d:'Repo health check: env vars, missing user-layer files, dependency versions',p:'scripts/doctor.mjs'},
+
+  // ── Routines (auto) ──────────────────────────────────────────────
+  {id:'rw',l:'run-routine.ps1',c:'auto',d:'Multi-CLI routine wrapper — validates ROUTINE_CONTRACT, enforces timeouts + allowlists, dispatches via CAREER_OPS_AGENT_CLI to an adapter under routines/adapters/',p:'routines/run-routine.ps1'},
+  {id:'a_cl',l:'adapters/claude',c:'auto',d:'Reference adapter — claude -p invocation with strict-MCP-config, subscription-billing guard, --allowedTools',p:'routines/adapters/claude.ps1'},
+  {id:'a_cx',l:'adapters/codex',c:'auto',d:'codex exec adapter',p:'routines/adapters/codex.ps1'},
+  {id:'a_gm',l:'adapters/gemini',c:'auto',d:'gemini -p adapter (stub — run system-eval manually before scheduling anything paid)',p:'routines/adapters/gemini.ps1'},
+  {id:'r_ms',l:'morning-scan',c:'auto',d:'Scheduled — scan.mjs against ATS API portals; writes Stage 1 rows',p:'routines/morning-scan.md'},
+  {id:'r_ls',l:'lunchtime-scan',c:'auto',d:'Scheduled — SERP scans against JS-heavy portals',p:'routines/lunchtime-scan.md'},
+  {id:'r_bb',l:'bd-bulk-scan',c:'auto',d:'Scheduled — Bright Data high-volume scraper across multiple portals',p:'routines/bd-bulk-scan.md'},
+  {id:'r_br',l:'bd-referral-scout',c:'auto',d:'Weekly — Layer-3 cold public-profile discovery via Bright Data',p:'routines/bd-referral-scout.md'},
+  {id:'r_cs',l:'chrome-scan-visible',c:'auto',d:'Interactive scan — logged-in browser session for portals that require auth',p:'routines/chrome-scan-visible.md'},
+  {id:'r_pc',l:'pace-check',c:'auto',d:'Scheduled — apply-pace monitor; raises alarm when adherence drops',p:'routines/pace-check.md'},
+  {id:'r_ae',l:'auto-eval',c:'auto',d:'Scheduled — A–G evaluation of Stage-1 rows (small chunks via drain loop)',p:'routines/auto-eval.md'},
+  {id:'r_ad',l:'auto-draft',c:'auto',d:'Scheduled — CV + cover-letter generation for Stage-2 rows (small chunks via drain loop)',p:'routines/auto-draft.md'},
+  {id:'r_rs',l:'referral-scout',c:'auto',d:'Scheduled — Layer-1 warm-path plan for Stage-3 rows',p:'routines/referral-scout.md'},
+  {id:'r_ip',l:'auto-interview-prep',c:'auto',d:'Scheduled — assembles the 6-doc interview pack for Stage 4+ rows',p:'routines/auto-interview-prep.md'},
+  {id:'r_se',l:'system-eval',c:'auto',d:'Watchdog — routine staleness / capacity / errors; emits WATCHDOG_ALERT lines',p:'routines/system-eval.md'},
+  {id:'r_hb',l:'dashboard-heartbeat',c:'auto',d:'Scheduled — refreshes dashboard.json + dashboard.html from Notion (no LLM)',p:'routines/dashboard-heartbeat.ps1'},
+
+  // ── Auto-driver + batch worker (infra) ───────────────────────────
+  {id:'adr',l:'_autodraft_cv_run.mjs',c:'infra',d:'One-shot CV-build driver called by auto-draft — resolves variant/lang/market and invokes generate-pdf-tailored',p:'batch/_autodraft_cv_run.mjs'},
+];
+
+const E=[
+  // ── Pipeline flow (thick pipeline edges) ──────────────────────────
+  {s:'s1',t:'s2',y:'pipeline'},{s:'s2',t:'s3',y:'pipeline'},{s:'s3',t:'s4',y:'pipeline'},{s:'s4',t:'s5',y:'pipeline'},
+
+  // ── Entry-point layering: every overlay reads AGENTS.md ───────────
+  {s:'cl',t:'ag',y:'import'},{s:'gm',t:'ag',y:'import'},{s:'cr',t:'ag',y:'import'},{s:'ai',t:'ag',y:'import'},
+  {s:'sk',t:'ag',y:'import'},{s:'rd',t:'ag',y:'import'},{s:'mn',t:'ag',y:'import'},
+  {s:'ag',t:'dc',y:'import'},
+  // AGENTS routes to modes via _shared / _profile
+  {s:'ag',t:'_sh',y:'import'},{s:'_pr',t:'_sh',y:'import'},
+
+  // ── Modes read defaults + user overrides + config ────────────────
+  {s:'m_of',t:'_sh',y:'import'},{s:'m_of',t:'_pr',y:'import'},{s:'m_of',t:'sty',y:'data'},
+  {s:'m_scan',t:'port',y:'data'},{s:'m_scan',t:'prof',y:'data'},
+  {s:'m_pdf',t:'cvm',y:'data'},{s:'m_pdf',t:'dig',y:'data'},{s:'m_pdf',t:'tpl',y:'data'},
+  {s:'m_ip',t:'sb',y:'data'},{s:'m_ip',t:'dig',y:'data'},
+  {s:'m_nt',t:'prof',y:'data'},{s:'m_nt',t:'sty',y:'data'},
+  {s:'m_apply',t:'_pr',y:'import'},
+
+  // ── Mode → script invocation ─────────────────────────────────────
+  {s:'m_scan',t:'scan',y:'routine'},{s:'m_scan',t:'bd',y:'routine'},
+  {s:'m_pdf',t:'gpdft',y:'routine'},{s:'m_pdf',t:'gpdf',y:'routine'},
+  {s:'m_ltx',t:'glat',y:'routine'},
+  {s:'m_batch',t:'adr',y:'routine'},
+  {s:'m_fu',t:'fc',y:'routine'},{s:'m_pat',t:'ap',y:'routine'},
+  {s:'m_cvqr',t:'qa',y:'import'},{s:'m_cvqr',t:'cvta',y:'import'},
+  {s:'m_auto',t:'m_of',y:'import'},{s:'m_auto',t:'m_pdf',y:'import'},{s:'m_pipe',t:'m_of',y:'import'},
+
+  // ── Ingest → scanner → Stage 1 ───────────────────────────────────
+  {s:'scan',t:'prov',y:'import'},{s:'scan',t:'port',y:'data'},{s:'scan',t:'tax',y:'data'},
+  {s:'scan',t:'sht',y:'data'},{s:'scan',t:'pmd',y:'data'},{s:'scan',t:'rtx',y:'import'},
+  {s:'bd',t:'port',y:'data'},{s:'bd',t:'sht',y:'data'},
+  {s:'wttj',t:'bd',y:'data'},
+  {s:'cpd',t:'sht',y:'data'},
+  {s:'live',t:'pmd',y:'data'},
+  {s:'sp',t:'prof',y:'data'},
+  {s:'scan',t:'s1',y:'routine'},{s:'bd',t:'s1',y:'routine'},
+
+  // ── CV pipeline (build) ──────────────────────────────────────────
+  {s:'gpdft',t:'cvm',y:'data'},{s:'gpdft',t:'dig',y:'data'},{s:'gpdft',t:'tpl',y:'data'},
+  {s:'gpdft',t:'jdt',y:'import'},{s:'gpdft',t:'h2p',y:'import'},{s:'gpdft',t:'prof',y:'data'},
+  {s:'gpdf',t:'cvm',y:'data'},{s:'gpdf',t:'tpl',y:'data'},{s:'gpdf',t:'h2p',y:'import'},
+  {s:'glat',t:'cvm',y:'data'},
+  {s:'qa',t:'m_cvqr',y:'import'},{s:'qa',t:'clg',y:'routine'},
+  {s:'weval',t:'sty',y:'data'},
+  {s:'csc',t:'cvm',y:'data'},{s:'csc',t:'prof',y:'data'},
+
+  // ── Cover-letter pipeline (build) ────────────────────────────────
+  {s:'clg',t:'clr',y:'import'},{s:'clg',t:'cls',y:'import'},{s:'clg',t:'cld',y:'import'},
+  {s:'clg',t:'clf',y:'import'},{s:'clg',t:'dinr',y:'import'},{s:'clg',t:'prof',y:'data'},
+  {s:'clr',t:'prof',y:'data'},{s:'clf',t:'cld',y:'import'},
+
+  // ── Auto-draft driver → CV + CL + Stage 3 ────────────────────────
+  {s:'adr',t:'gpdft',y:'import'},{s:'adr',t:'clg',y:'import'},{s:'adr',t:'jdt',y:'import'},
+  {s:'adr',t:'nd',y:'routine'},{s:'adr',t:'nu',y:'routine'},
+  {s:'adr',t:'s3',y:'routine'},
+
+  // ── Metrics semantic layer (hub) ─────────────────────────────────
+  {s:'fm',t:'mc',y:'import'},{s:'ap',t:'mc',y:'import'},{s:'pa',t:'mc',y:'import'},
+  {s:'fc',t:'mc',y:'import'},{s:'vp',t:'mc',y:'import'},{s:'bd2',t:'mc',y:'import'},
+  {s:'mc',t:'sty',y:'data'},
+  {s:'pa',t:'prof',y:'data'},{s:'aw',t:'prof',y:'data'},
+
+  // ── Local-tracker consumers ──────────────────────────────────────
+  {s:'mrg',t:'amd',y:'data'},{s:'vp',t:'amd',y:'data'},{s:'ap',t:'amd',y:'data'},{s:'fc',t:'amd',y:'data'},
+
+  // ── Notion writes / reads ────────────────────────────────────────
+  {s:'nq',t:'not',y:'data'},{s:'ne',t:'not',y:'data'},{s:'nd',t:'not',y:'data'},{s:'nu',t:'not',y:'data'},
+  {s:'nds',t:'not',y:'data'},
+  {s:'fm',t:'not',y:'data'},{s:'bd2',t:'not',y:'data'},
+  {s:'ne',t:'nq',y:'import'},{s:'nd',t:'nq',y:'import'},
+  {s:'ne',t:'s2',y:'routine'},{s:'nu',t:'s3',y:'routine'},{s:'nd',t:'s3',y:'routine'},
+
+  // ── Dashboard ────────────────────────────────────────────────────
+  {s:'bd2',t:'djn',y:'data'},
+
+  // ── Referral-scout layer handoff (Layer 1 → Layer 3) ─────────────
+  {s:'rsr',t:'not',y:'data'},{s:'bdr',t:'not',y:'data'},{s:'bdr',t:'rsr',y:'import'},
+
+  // ── Routines → wrapper → adapters ────────────────────────────────
+  {s:'rw',t:'a_cl',y:'routine'},{s:'rw',t:'a_cx',y:'routine'},{s:'rw',t:'a_gm',y:'routine'},
+  {s:'rw',t:'mcp',y:'import'},
+
+  // ── Routines → scripts / stages ──────────────────────────────────
+  {s:'r_ms',t:'scan',y:'routine'},{s:'r_ms',t:'rw',y:'routine'},
+  {s:'r_ls',t:'scan',y:'routine'},{s:'r_ls',t:'rw',y:'routine'},
+  {s:'r_bb',t:'bd',y:'routine'},{s:'r_bb',t:'rw',y:'routine'},
+  {s:'r_br',t:'bdr',y:'routine'},
+  {s:'r_cs',t:'not',y:'routine'},
+  {s:'r_pc',t:'pa',y:'routine'},{s:'r_pc',t:'rw',y:'routine'},
+  {s:'r_ae',t:'m_of',y:'routine'},{s:'r_ae',t:'ne',y:'routine'},{s:'r_ae',t:'s2',y:'routine'},{s:'r_ae',t:'rw',y:'routine'},
+  {s:'r_ad',t:'adr',y:'routine'},{s:'r_ad',t:'s3',y:'routine'},{s:'r_ad',t:'rw',y:'routine'},
+  {s:'r_rs',t:'rsr',y:'routine'},{s:'r_rs',t:'rw',y:'routine'},
+  {s:'r_ip',t:'m_ip',y:'routine'},{s:'r_ip',t:'s5',y:'routine'},{s:'r_ip',t:'rw',y:'routine'},
+  {s:'r_se',t:'doc',y:'routine'},
+  {s:'r_hb',t:'bd2',y:'routine'},
+
+  // ── Health/version ───────────────────────────────────────────────
+  {s:'doc',t:'ver',y:'data'},{s:'doc',t:'prof',y:'data'},
+];
+
+// Build lookup + adjacency
+const byId=Object.create(null);
+N.forEach(n=>{byId[n.id]=n});
+const adj=Object.create(null);
+N.forEach(n=>{adj[n.id]=new Set});
+E.forEach(e=>{adj[e.s].add(e.t);adj[e.t].add(e.s)});
+
+// Degree for radius
+N.forEach(n=>{
+  const deg=E.filter(e=>e.s===n.id||e.t===n.id).length;
+  n.r=n.c==='pipeline'?14:Math.max(5,Math.min(14,3+deg*1.1));
+});
+
+// Initial positions — cluster by category
+const CP={
+  pipeline:[0,0],
+  entry:  [-520, -260],
+  ingest: [-380,  20],
+  build:  [ 280, -120],
+  data:   [-160,  310],
+  auto:   [ 420, -260],
+  infra:  [ 200,  260],
+};
+const stageY={s1:-200,s2:-100,s3:0,s4:100,s5:200};
+N.forEach(n=>{
+  if(stageY[n.id]!=null){n.x=0;n.y=stageY[n.id]}
+  else{const[cx,cy]=CP[n.c]||[0,0];n.x=cx+(Math.random()-.5)*220;n.y=cy+(Math.random()-.5)*220}
+  n.vx=0;n.vy=0;n.visible=true;n.dim=false;
+});
+
+// Physics
+const REP=2400,SPR=.022,REST=115,GRAV=.007,DAMP=.82;
+function tick(){
+  for(let i=0;i<N.length;i++){
+    const a=N[i];if(!a.visible||a.pinned)continue;
+    let fx=0,fy=0;
+    for(let j=0;j<N.length;j++){
+      if(i===j||!N[j].visible)continue;
+      const dx=a.x-N[j].x,dy=a.y-N[j].y;
+      const d2=dx*dx+dy*dy+1,d=Math.sqrt(d2);
+      const f=REP/d2;fx+=f*dx/d;fy+=f*dy/d;
+    }
+    for(const e of E){
+      let other=null;
+      if(e.s===a.id)other=byId[e.t];
+      else if(e.t===a.id)other=byId[e.s];
+      if(!other||!other.visible)continue;
+      const dx=other.x-a.x,dy=other.y-a.y,d=Math.sqrt(dx*dx+dy*dy)||1;
+      const f=SPR*(d-REST);fx+=f*dx/d;fy+=f*dy/d;
+    }
+    fx-=a.x*GRAV;fy-=a.y*GRAV;
+    a.vx=(a.vx+fx)*DAMP;a.vy=(a.vy+fy)*DAMP;
+    a.x+=a.vx;a.y+=a.vy;
+  }
+}
+
+// Run initial settle
+for(let i=0;i<320;i++)tick();
+
+// Canvas setup
+const cvs=document.getElementById('c'),ctx=cvs.getContext('2d');
+const dpr=devicePixelRatio||1;
+let W,H,zoom=1,panX=0,panY=0;
+function resize(){
+  const r=cvs.getBoundingClientRect();W=r.width;H=r.height;
+  cvs.width=W*dpr;cvs.height=H*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+resize();
+addEventListener('resize',resize);
+
+function zoomFit(){
+  let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;
+  for(const n of N){if(!n.visible)continue;x0=Math.min(x0,n.x-80);x1=Math.max(x1,n.x+140);y0=Math.min(y0,n.y-30);y1=Math.max(y1,n.y+30)}
+  const gw=x1-x0||1,gh=y1-y0||1;
+  zoom=Math.min(W/gw,H/gh)*.88;zoom=Math.min(Math.max(zoom,.15),2.5);
+  panX=-(x0+x1)/2*zoom;panY=-(y0+y1)/2*zoom;
+}
+zoomFit();
+
+function s2g(sx,sy){return{x:(sx-panX-W/2)/zoom,y:(sy-panY-H/2)/zoom}}
+function findAt(gx,gy){
+  for(let i=N.length-1;i>=0;i--){
+    const n=N[i];if(!n.visible)continue;
+    const dx=n.x-gx,dy=n.y-gy;
+    if(dx*dx+dy*dy<(n.r+4)*(n.r+4))return n;
+  }return null;
+}
+
+// State
+let hovered=null,selected=null,dragging=null,panning=false,mx=0,my=0,simRunning=false,simTicks=0;
+const catVis=Object.create(null);
+Object.keys(CATS).forEach(k=>{catVis[k]=true});
+let searchQ='';
+
+// Filters
+const filtersEl=document.getElementById('filters');
+Object.entries(CATS).forEach(([k,v])=>{
+  const b=document.createElement('button');b.className='fbtn';b.dataset.cat=k;
+  b.innerHTML=`<span class="dot" style="background:${v.dark}"></span>${v.label}`;
+  b.onclick=()=>{catVis[k]=!catVis[k];b.classList.toggle('off',!catVis[k]);applyVis()};
+  filtersEl.appendChild(b);
+});
+
+function applyVis(){
+  for(const n of N){
+    n.visible=catVis[n.c]&&(!searchQ||n.l.toLowerCase().includes(searchQ)||(n.d||'').toLowerCase().includes(searchQ));
+    n.dim=!!searchQ&&!n.l.toLowerCase().includes(searchQ)&&!(n.d||'').toLowerCase().includes(searchQ);
+  }
+}
+
+// Search
+const searchEl=document.getElementById('search');
+searchEl.addEventListener('input',()=>{searchQ=searchEl.value.trim().toLowerCase();applyVis()});
+addEventListener('keydown',e=>{
+  if(e.key==='/'&&document.activeElement!==searchEl){e.preventDefault();searchEl.focus()}
+  if(e.key==='Escape'){searchEl.value='';searchQ='';applyVis();hidePanel();searchEl.blur()}
+  if(e.key==='f'&&document.activeElement!==searchEl)zoomFit();
+});
+
+// Edge style
+const ESTYLE={
+  pipeline:{w:2.5,dash:[],alpha:.6},
+  import:  {w:1.2,dash:[],alpha:.25},
+  data:    {w:1,  dash:[6,4],alpha:.2},
+  routine: {w:1,  dash:[2,3],alpha:.2},
+};
+const ECOLOR={
+  pipeline:()=>catColor('pipeline'),
+  import:()=>catColor('build'),
+  data:()=>catColor('data'),
+  routine:()=>catColor('auto'),
+};
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  ctx.translate(panX+W/2,panY+H/2);ctx.scale(zoom,zoom);
+
+  const focusId=hovered?.id||selected?.id||null;
+  const connSet=new Set;
+  if(focusId){adj[focusId].forEach(id=>connSet.add(id));connSet.add(focusId)}
+
+  // Edges
+  for(const e of E){
+    const ns=byId[e.s],nt=byId[e.t];
+    if(!ns||!nt||!ns.visible||!nt.visible)continue;
+    const es=ESTYLE[e.y],ec=ECOLOR[e.y]();
+    let alpha=es.alpha;
+    if(focusId){
+      if(e.s===focusId||e.t===focusId)alpha=Math.min(alpha*3,.8);
+      else alpha*=.15;
+    }
+    ctx.beginPath();ctx.strokeStyle=ec;ctx.globalAlpha=alpha;ctx.lineWidth=es.w/Math.max(zoom,.5);
+    ctx.setLineDash(es.dash.map(d=>d/Math.max(zoom,.5)));
+    const dx=nt.x-ns.x,dy=nt.y-ns.y,d=Math.sqrt(dx*dx+dy*dy)||1;
+    const cx2=(ns.x+nt.x)/2+(-dy/d)*d*.1,cy2=(ns.y+nt.y)/2+(dx/d)*d*.1;
+    ctx.moveTo(ns.x,ns.y);ctx.quadraticCurveTo(cx2,cy2,nt.x,nt.y);ctx.stroke();
+    // Arrow
+    if(e.y==='pipeline'||e.y==='routine'){
+      const ang=Math.atan2(nt.y-cy2,nt.x-cx2);
+      const ax=nt.x-Math.cos(ang)*(nt.r+2),ay=nt.y-Math.sin(ang)*(nt.r+2);
+      const sz=e.y==='pipeline'?6:4;
+      ctx.fillStyle=ec;
+      ctx.beginPath();ctx.moveTo(ax,ay);
+      ctx.lineTo(ax-Math.cos(ang-0.4)*sz,ay-Math.sin(ang-0.4)*sz);
+      ctx.lineTo(ax-Math.cos(ang+0.4)*sz,ay-Math.sin(ang+0.4)*sz);
+      ctx.closePath();ctx.fill();
+    }
+    ctx.setLineDash([]);ctx.globalAlpha=1;
+  }
+
+  // Nodes
+  for(const n of N){
+    if(!n.visible)continue;
+    const cc=catColor(n.c);
+    let alpha=1;
+    if(focusId&&!connSet.has(n.id))alpha=.12;
+    if(n.dim)alpha=.15;
+    ctx.globalAlpha=alpha;
+
+    // Glow
+    if(n.id===focusId){
+      ctx.shadowColor=cc;ctx.shadowBlur=16;
+    }
+    ctx.beginPath();ctx.arc(n.x,n.y,n.r,0,Math.PI*2);
+    ctx.fillStyle=cc;ctx.fill();
+    if(n.c==='pipeline'){ctx.strokeStyle=cc;ctx.lineWidth=2;ctx.stroke()}
+    ctx.shadowBlur=0;
+
+    // Label
+    const fs=n.r>10?12:10.5;
+    ctx.font=`500 ${fs}px ui-monospace,'Cascadia Code','SF Mono',monospace`;
+    ctx.textAlign='left';ctx.textBaseline='middle';
+    ctx.fillStyle=focusId&&!connSet.has(n.id)?cc:cc;
+    ctx.fillText(n.l,n.x+n.r+6,n.y);
+    ctx.globalAlpha=1;
+  }
+  ctx.restore();
+}
+
+// Animation loop
+let raf;
+function loop(){draw();raf=requestAnimationFrame(loop)}
+loop();
+
+// Sim runner (on drag)
+function runSim(ticks){simRunning=true;simTicks=ticks;(function go(){if(simTicks--<=0){simRunning=false;return}tick();requestAnimationFrame(go)})()}
+
+// Mouse interaction
+cvs.addEventListener('pointerdown',e=>{
+  const r=cvs.getBoundingClientRect();
+  const sx=e.clientX-r.left,sy=e.clientY-r.top;
+  const g=s2g(sx,sy);const n=findAt(g.x,g.y);
+  if(n){dragging=n;n.pinned=true;cvs.classList.add('dragging')}
+  else{panning=true;mx=e.clientX;my=e.clientY;cvs.classList.add('dragging')}
+  document.getElementById('hint')?.classList.add('gone');
+  setTimeout(()=>document.getElementById('hint')?.remove(),1000);
+});
+addEventListener('pointermove',e=>{
+  const r=cvs.getBoundingClientRect();
+  const sx=e.clientX-r.left,sy=e.clientY-r.top;
+  if(dragging){
+    const g=s2g(sx,sy);dragging.x=g.x;dragging.y=g.y;
+    if(!simRunning)runSim(60);
+  }else if(panning){
+    panX+=e.clientX-mx;panY+=e.clientY-my;mx=e.clientX;my=e.clientY;
+  }else{
+    const g=s2g(sx,sy);hovered=findAt(g.x,g.y);
+    cvs.style.cursor=hovered?'pointer':'grab';
+  }
+});
+addEventListener('pointerup',e=>{
+  if(dragging){
+    dragging.pinned=false;
+    const r=cvs.getBoundingClientRect();
+    const g=s2g(e.clientX-r.left,e.clientY-r.top);
+    const hit=findAt(g.x,g.y);
+    if(hit)selectNode(hit);
+    dragging=null;
+  }
+  panning=false;cvs.classList.remove('dragging');
+});
+cvs.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const r=cvs.getBoundingClientRect();
+  const sx=e.clientX-r.left,sy=e.clientY-r.top;
+  const g=s2g(sx,sy);
+  const factor=e.deltaY>0?.88:1/.88;
+  const nz=Math.min(Math.max(zoom*factor,.12),4);
+  panX=sx-W/2-(g.x*nz);panY=sy-H/2-(g.y*nz);zoom=nz;
+},{passive:false});
+
+// Detail panel
+const panel=document.getElementById('panel');
+const panelBody=document.getElementById('panel-body');
+document.getElementById('close-panel').onclick=hidePanel;
+
+function selectNode(n){
+  selected=n;showPanel(n);
+  const tx=-n.x*zoom,ty=-n.y*zoom;
+  const dx=tx-panX,dy=ty-panY;
+  let f=0;
+  (function ani(){f+=.08;if(f>=1)f=1;
+    panX+=dx*.08;panY+=dy*.08;if(f<1)requestAnimationFrame(ani)})();
+}
+
+function showPanel(n){
+  const cc=catColor(n.c);
+  let h=`<h2 style="color:${cc}">${esc(n.l)}</h2>`;
+  h+=`<span class="badge" style="background:${cc}22;color:${cc}">${CATS[n.c].label}</span>`;
+  if(n.t)h+=`<span class="badge" style="background:var(--border);color:var(--text-2);margin-left:4px">${n.t}</span>`;
+  h+=`<p class="desc">${esc(n.d||'')}</p>`;
+  if(n.p)h+=`<div class="path-row">${esc(n.p)}</div>`;
+
+  const out=[],inc=[];
+  for(const e of E){
+    if(e.s===n.id&&byId[e.t])out.push({node:byId[e.t],type:e.y});
+    if(e.t===n.id&&byId[e.s])inc.push({node:byId[e.s],type:e.y});
+  }
+  if(out.length){
+    h+='<div class="conn-group"><div class="conn-label">→ Outgoing</div>';
+    out.forEach(c=>{
+      h+=`<div class="conn-item" data-id="${c.node.id}" style="color:${catColor(c.node.c)}">`;
+      h+=`<span style="opacity:.4;font-size:10px">${c.type}</span> ${esc(c.node.l)}</div>`;
+    });h+='</div>';
+  }
+  if(inc.length){
+    h+='<div class="conn-group"><div class="conn-label">← Incoming</div>';
+    inc.forEach(c=>{
+      h+=`<div class="conn-item" data-id="${c.node.id}" style="color:${catColor(c.node.c)}">`;
+      h+=`<span style="opacity:.4;font-size:10px">${c.type}</span> ${esc(c.node.l)}</div>`;
+    });h+='</div>';
+  }
+  panelBody.innerHTML=h;
+  panel.classList.add('open');
+  panelBody.querySelectorAll('.conn-item').forEach(el=>{
+    el.onclick=()=>{const nd=byId[el.dataset.id];if(nd)selectNode(nd)};
+  });
+}
+function hidePanel(){panel.classList.remove('open');selected=null}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+// Theme change listener
+function onTheme(){draw()}
+matchMedia('(prefers-color-scheme:dark)').addEventListener('change',onTheme);
+new MutationObserver(onTheme).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+
+// Auto-hide hint
+setTimeout(()=>document.getElementById('hint')?.classList.add('gone'),5000);
+</script>
