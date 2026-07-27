@@ -94,6 +94,37 @@ function firecrawlFetch(urls) {
   return out;
 }
 
+// Parse a Xing job DETAIL page's HTML for the REAL company + title. Xing
+// exposes stable data-testid anchors on every employer's posting:
+//   job-details-title             → the <h1> holds the true role title
+//   job-details-company-info-name → text is the true company (incl. the staffing
+//                                    agency behind a syndicated multi-city posting)
+// Employer-agnostic; hoisted so --self-test can exercise it. Returns {title,company}
+// with nulls when an anchor is absent.
+function parseXingDetail(html) {
+  const h = html || "";
+  const clean = (s) => s ? s.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#x27;/g, "'").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim() : "";
+  const title = clean((h.match(/data-testid="job-details-title"[\s\S]{0,400}?<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1]);
+  const company = clean((h.match(/data-testid="job-details-company-info-name"[^>]*>([\s\S]*?)<\/(?:p|span|a|div)>/i) || [])[1]);
+  return { title: title || null, company: company || null };
+}
+
+// Fetch + parse a single Xing detail page via self-hosted Firecrawl (raw HTML).
+// Returns { company, title } or null on any failure — the caller then keeps the
+// slug-derived values, so enrichment never drops a job.
+function enrichXingDetail(url) {
+  const safe = url.replace(/[^a-z0-9]/gi, "_").slice(-80);
+  const outPath = `data/.tmp/fc-cache/xd_${safe}.html`;
+  try {
+    execFileSync('firecrawl', ['scrape', url, '--html', '--wait-for', String(FIRECRAWL_WAIT_MS), '-o', outPath], {
+      stdio: ["ignore", "ignore", "pipe"], timeout: 90_000,
+      env: { ...process.env, FIRECRAWL_API_URL: FIRECRAWL_URL },
+    });
+    const parsed = parseXingDetail(readFileSync(outPath, "utf8"));
+    return (parsed.company || parsed.title) ? parsed : null;
+  } catch { return null; }
+}
+
 // ─── CLI args ────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
 const arg = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i+1] : null; };
@@ -113,10 +144,14 @@ const PAGES = parseInt(arg("--pages") || "2", 10);
 const MAX_BATCH = parseInt(arg("--max-batch") || "25", 10);
 const JSON_OUT = has("--json");
 
-// --self-test: regression guard for the three extraction bugs fixed 2026-07-06
-// (canonicalUrl query-string job-id, Civil-Service umbrella collapse, SERP-markdown
-// shape). Runs before any env/network dependency so CI can call it token-free.
-if (has("--self-test")) { selfTest(); }
+// --self-test: regression guard for the extraction bugs fixed 2026-07-06 and
+// 2026-07-13 (canonicalUrl query-string job-id, Civil-Service umbrella collapse,
+// SERP-markdown shape, Xing slug drop, sponsoredjobs relative pattern, Xing
+// detail-page parser). Runs before any network dependency so CI can call it
+// token-free.
+// NOTE: selfTest() is invoked AFTER the PORTALS object is defined (below the
+// PORTALS block) so its assertions can call the real portal extractors. The
+// env checks below skip under --self-test so this stays token-free for CI.
 function selfTest() {
   const A = [];
   const ok = (cond, label) => A.push({ label, pass: !!cond });
@@ -152,6 +187,25 @@ function selfTest() {
   const md = organicToMarkdown([{ title: "Data Scientist", link: "https://x/jobs.cgi?jcode=5" }]);
   ok(/\[Data Scientist\]\(https:\/\/x\/jobs\.cgi\?jcode=5\)/.test(md), "organicToMarkdown emits [title](link)");
 
+  // Bug 4 (2026-07-13) — the xing extractor built the title with `.slice(0, -1)`,
+  // dropping the LAST word (the numeric id is already split off by the regex), so
+  // `berlin-analytics-engineer` → "Berlin Analytics" and passesFilter's positive
+  // phrase "analytics engineer" never matched → silent xing under-yield.
+  const xj = PORTALS.xing.extract("prefix https://www.xing.com/jobs/berlin-analytics-engineer-155942246 suffix");
+  ok(xj.length === 1 && /analytics engineer/i.test(xj[0].title), "xing extract keeps full title (regression: slice(0,-1))");
+
+  // Bug 5 (2026-07-13) — sponsoredjobs links render as ABSOLUTE urls in Firecrawl
+  // markdown; the old `/\(\/jobs\/…\)/` (relative-link-in-parens) pattern matched 0.
+  const sj = PORTALS.sponsoredjobs.extract("[Data Engineer](https://sponsoredjobs.co.uk/jobs/data-engineer-at-monzo)");
+  ok(sj.length === 1 && /data engineer/i.test(sj[0].title) && /monzo/i.test(sj[0].company), "sponsoredjobs extract matches absolute URL (regression: relative-paren pattern)");
+
+  // Bug 6 (2026-07-13) — Xing rows are enriched from the detail page: parseXingDetail
+  // must read the real title (<h1> inside job-details-title) and the real company
+  // (job-details-company-info-name) so staffing-agency syndication folds by
+  // (company, title) instead of surfacing the same role across dozens of city slugs.
+  const xd = parseXingDetail('<div data-testid="job-details-title" class="c"><h1 data-xds="Hero">Machine Learning Engineer (m/w/d)</h1></div><p data-testid="job-details-company-info-name">HIBA GmbH</p>');
+  ok(xd.title === "Machine Learning Engineer (m/w/d)" && xd.company === "HIBA GmbH", "parseXingDetail reads real title + company from detail HTML");
+
   // Country resolution — the posting's Location beats the search-query country.
   ok(resolveCountry({ _country: "Germany", url: "https://linkedin.com/x", location: "Dublin, Ireland" }) === "Ireland", "resolveCountry: Dublin under a Germany query → Ireland");
   ok(resolveCountry({ _country: "UK", url: "https://linkedin.com/x", location: "Berlin, Berlin, Germany" }) === "Germany", "resolveCountry: Berlin under a UK query → Germany");
@@ -170,12 +224,12 @@ function selfTest() {
 // ─── Env + config ────────────────────────────────────────────────────────
 const TOKEN = process.env.BRIGHTDATA_DATASET_TOKEN;
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
-if (!TOKEN) {
+if (!TOKEN && !has("--self-test")) {
   console.error("ROUTINE_ABORT: BRIGHTDATA_DATASET_TOKEN env var not set.");
   console.error('Run: setx BRIGHTDATA_DATASET_TOKEN "<uuid-token-from-brightdata>"');
   process.exit(5);
 }
-if (!NOTION_TOKEN) {
+if (!NOTION_TOKEN && !has("--self-test")) {
   console.error("ROUTINE_ABORT: NOTION_TOKEN env var not set.");
   process.exit(5);
 }
@@ -195,7 +249,7 @@ const CFG = loadConfig();
 // old key accepted as fallback.
 const BULK = CFG.bulk_scrape || CFG.apify || {};
 const DATABASE_ID = CFG.notion && CFG.notion.applications_database_id;
-if (!DATABASE_ID) {
+if (!DATABASE_ID && !has("--self-test")) {
   console.error("ROUTINE_ABORT: notion.applications_database_id not set in config/profile.yml");
   process.exit(5);
 }
@@ -341,7 +395,13 @@ const PORTALS = {
         seen.add(id);
         const slug = m[1];
         const url = m[0];
-        const title = slug.split("-").slice(0, -1).join(" ").replace(/(^| )(\w)/g, (_, s, c) => s + c.toUpperCase());
+        // FIXED 2026-07-13: was `.slice(0, -1)`, which dropped the LAST word of the
+        // title — but the numeric ID is already stripped by the regex's `-(\d+)`
+        // capture, so the slug is pure words. Dropping the last word turned
+        // `berlin-analytics-engineer` into "Berlin Analytics" (no "Engineer"), so it
+        // failed passesFilter's required positive-phrase match ("analytics engineer").
+        // Keeping all words ~doubled the Xing filter pass-rate (111 → 235 on a real batch).
+        const title = slug.split("-").join(" ").replace(/(^| )(\w)/g, (_, s, c) => s + c.toUpperCase());
         out.push({ url, title, company: "Undisclosed (Xing)", source_portal: "Xing" });
       }
       return out;
@@ -666,7 +726,12 @@ const PORTALS = {
       const out = [];
       const seen = new Set();
       const cap = (s) => s.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim();
-      const re = /\(\/jobs\/([a-z0-9-]+)-at-([a-z0-9-]+)\)/g;
+      // FIXED 2026-07-13: was `/\(\/jobs\/…\)/` (relative link in parens), but the
+      // Firecrawl render emits ABSOLUTE URLs — `](https://sponsoredjobs.co.uk/jobs/X-at-Y)`
+      // — so the paren-prefixed relative pattern matched 0. Match the absolute URL
+      // anywhere. Also required routing sponsoredjobs through Firecrawl (BD generic
+      // returned a JS shell with no links).
+      const re = /https?:\/\/sponsoredjobs\.co\.uk\/jobs\/([a-z0-9-]+)-at-([a-z0-9-]+)/g;
       let m;
       while ((m = re.exec(md || ""))) {
         const url = `https://sponsoredjobs.co.uk/jobs/${m[1]}-at-${m[2]}`;
@@ -736,6 +801,11 @@ const PORTALS = {
   // No scrape path works without solving CAPTCHAs. CareerBee + Xing + Stepstone
   // already cover the DE market.
 };
+
+// Run the self-test now that PORTALS exists, so its assertions can exercise the
+// real portal extractors (not replicas). Token-free: the env checks above are
+// skipped under --self-test. Exits 0 (pass) or 1 (fail).
+if (has("--self-test")) { selfTest(); process.exit(0); }
 
 // ─── Plan: build URL list ────────────────────────────────────────────────
 function plan() {
@@ -1005,6 +1075,20 @@ console.error(`bd-bulk-scan: local seen-cache loaded with ${seen.size} canonical
 // Pre-seed seen-cache with every Job URL already in Notion (last 90 days).
 // This is the authoritative dedup gate — survives if data/bd-seen-urls.json
 // is ever deleted or out of sync.
+//
+// ALSO builds a company+position(+city) map for the CROSS-PORTAL gate: the same
+// vacancy posted on two portals has two unrelated URLs (e.g. the same role on
+// Xing AND eFinancialCareers), so URL dedup can never catch it. A new job whose
+// company + inferred position (+ compatible city) already exists in the window
+// is skipped at insert.
+function normCityKey(loc) {
+  let s = String(loc || "").toLowerCase().split(/[,\/]/)[0].trim();
+  for (const [a, b] of [["wien", "vienna"], ["münchen", "munich"], ["muenchen", "munich"], ["köln", "cologne"], ["koeln", "cologne"], ["frankfurt am main", "frankfurt"]]) {
+    if (s.includes(a)) return b;
+  }
+  return s.replace(/[^a-z]/g, "");
+}
+const seenCompanyPos = new Map();  // "normCompany::Position" -> Set(normCity, may include "")
 async function preloadNotionUrls() {
   const ninetyDaysAgo = new Date(Date.now() - 90 * 86400_000).toISOString().slice(0, 10);
   const filter = { property: "Discovered date", date: { on_or_after: ninetyDaysAgo } };
@@ -1023,15 +1107,68 @@ async function preloadNotionUrls() {
     }
     const data = await r.json();
     for (const row of data.results) {
-      const u = row.properties?.["Job URL"]?.url;
+      const P = row.properties || {};
+      const u = P["Job URL"]?.url;
       if (u) { seen.add(canonicalUrl(u)); count++; }
+      const comp = normCompany((P["Company"]?.title || []).map(o => o.plain_text).join(""));
+      if (!comp || /undisclosed|confidential/.test(comp)) continue;
+      const city = normCityKey((P["Location"]?.rich_text || []).map(o => o.plain_text).join(""));
+      for (const pos of (P["Position"]?.multi_select || []).map(o => o.name)) {
+        const k = comp + "::" + pos;
+        if (!seenCompanyPos.has(k)) seenCompanyPos.set(k, new Set());
+        seenCompanyPos.get(k).add(city);
+      }
     }
     cursor = data.next_cursor;
   } while (cursor);
   return count;
 }
+// A new job is a cross-portal duplicate when its company+position key exists AND
+// the city matches — or either side's city is unknown (freeform portal data).
+// Different KNOWN cities stay separate rows (branch policy handles those).
+function isCrossPortalDupe(j) {
+  const comp = normCompany(j.company);
+  if (!comp || /undisclosed|confidential/.test(comp)) return false;
+  const city = normCityKey(j.location);
+  for (const pos of inferPosition(j.title || j._role)) {
+    const cities = seenCompanyPos.get(comp + "::" + pos);
+    if (!cities) continue;
+    if (cities.has(city) || city === "" || cities.has("")) return true;
+  }
+  return false;
+}
 const notionPreloaded = NO_SEEN ? 0 : await preloadNotionUrls();
-console.error(`bd-bulk-scan: Notion-side preload added ${notionPreloaded} canonical URLs → seen-cache now ${seen.size}`);
+console.error(`bd-bulk-scan: Notion-side preload added ${notionPreloaded} canonical URLs + ${seenCompanyPos.size} company-position keys → seen-cache now ${seen.size}`);
+
+// --probe-xportal: exercise the LIVE cross-portal gate against real Notion data
+// without scraping or writing. Derives its cases from the freshly-loaded map so
+// it stays valid as the 90-day window rolls: takes a real (company,position,city)
+// key as the positive, and a guaranteed-absent company as the negative. Confirms
+// the exact isCrossPortalDupe() the insert loop uses. Exits 0 (pass) / 1 (fail).
+if (has("--probe-xportal")) {
+  const results = [];
+  const check = (name, got, want) => { results.push({ name, pass: got === want, got, want }); };
+  const firstKey = [...seenCompanyPos.keys()][0];
+  if (!firstKey) {
+    console.error("PROBE_XPORTAL: no company-position keys in window — cannot self-test (is the DB empty / token missing?)");
+    process.exit(1);
+  }
+  const [compRaw, pos] = firstKey.split("::");
+  const cities = seenCompanyPos.get(firstKey);
+  const knownCity = [...cities].find((c) => c !== "") ?? "";
+  const sampleJob = { company: compRaw, title: pos, location: knownCity, url: "https://probe.test/x", source_portal: "ProbeTest" };
+  check(`positive: known ${compRaw.trim()}|${pos}|${knownCity || "(no-city)"} → dupe`, isCrossPortalDupe(sampleJob), true);
+  check(`positive: known ${pos} w/ blank city → dupe`, isCrossPortalDupe({ ...sampleJob, location: "" }), true);
+  check("negative: novel company → not dupe", isCrossPortalDupe({ ...sampleJob, company: "Zzq Nonexistent Probe Co GmbH" }), false);
+  check("negative: Undisclosed company → not dupe", isCrossPortalDupe({ ...sampleJob, company: "Undisclosed (Indeed)" }), false);
+  let failed = 0;
+  for (const r of results) {
+    console.log(`${r.pass ? "PASS" : "FAIL"}  ${r.name}${r.pass ? "" : `  (got ${r.got}, want ${r.want})`}`);
+    if (!r.pass) failed++;
+  }
+  console.log(`\nPROBE_XPORTAL: ${results.length - failed}/${results.length} passed against ${seenCompanyPos.size} live keys`);
+  process.exit(failed ? 1 : 0);
+}
 
 const allJobs = [];
 const portalCounts = {};
@@ -1040,7 +1177,7 @@ const errors = [];
 // Portals routed through self-hosted Firecrawl (BD returns unhydrated React
 // shells for these — 0 job URLs in BD markdown/html). Sequential CLI calls
 // against localhost:3002 with wait_for so the JS app renders before scrape.
-const FIRECRAWL_PORTALS = new Set(["xing", "careerbee"]);
+const FIRECRAWL_PORTALS = new Set(["xing", "careerbee", "sponsoredjobs"]);
 
 // Flatten urls + remember portal mapping
 const flat = [];
@@ -1408,19 +1545,68 @@ function inferPosition(title) {
   return [...new Set(positions)];
 }
 
+// ── Xing JD enrichment + syndication fold ────────────────────────────────
+// The Xing SEARCH page only exposes a slug-derived title + "Undisclosed (Xing)"
+// company — low-signal for eval AND unable to dedup staffing-agency syndication
+// (one client role posted across dozens of city-slug URLs as distinct listings).
+// Read each Xing detail page's real company + title from Xing's stable data-testid
+// header (parseXingDetail), then fold same-(company, title) rows to one. Enrichment
+// failures keep the slug values (never drops a job). Steady-state cost is low: only
+// NET-NEW Xing rows reach here (already-seen URLs were dropped by the seen-cache).
+{
+  const xingRows = allJobs.filter((j) => j.source_portal === "Xing");
+  if (xingRows.length && !DRY_RUN) {
+    console.error(`  xing-enrich: reading ${xingRows.length} Xing detail pages for real company/title...`);
+    const normT = (s) => (s || "").toLowerCase().replace(/\([^)]*\)/g, " ").replace(/\b(m|w|d|gn|all genders)\b/g, " ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+    const sig = new Set();
+    const kept = [];
+    let enriched = 0, folded = 0, refiltered = 0;
+    for (const j of allJobs) {
+      if (j.source_portal !== "Xing") { kept.push(j); continue; }
+      const en = enrichXingDetail(j.url);
+      if (en) {
+        if (en.company) j.company = en.company;
+        if (en.title) j.title = en.title;
+        j.jd_summary = "[xing: company+title read from detail page]";
+        enriched++;
+      }
+      // Re-apply the title band on the REAL title (may reveal a Senior/Lead the
+      // slug hid, or confirm a clean role).
+      if (!passesFilter(j)) { refiltered++; continue; }
+      const k = normCompany(j.company) + "::" + normT(j.title);
+      if (sig.has(k)) { folded++; continue; }   // fold agency syndication
+      sig.add(k);
+      kept.push(j);
+    }
+    console.error(`  xing-enrich: enriched ${enriched}/${xingRows.length}, folded ${folded} syndicated dupes, dropped ${refiltered} on real-title filter`);
+    allJobs.length = 0;
+    allJobs.push(...kept);
+    // Keep JOBS_PER_PORTAL honest: reflect the post-fold Xing count, not the raw
+    // pre-enrichment extraction (which counted every syndicated city-slug).
+    portalCounts.xing = kept.filter((j) => j.source_portal === "Xing").length;
+  }
+}
+
 // ─── Pre-Notion clean gate: in-batch branch dedup ────────────────────────
 const beforeCollapse = allJobs.length;
 const cleanJobs = collapseBranchDupes(allJobs);
 const branchCollapsed = beforeCollapse - cleanJobs.length;
 console.error(`bd-bulk-scan: in-batch branch dedup collapsed ${branchCollapsed} same-(company,city) duplicates (${beforeCollapse} → ${cleanJobs.length})`);
 
-let written = 0, writeFails = 0;
+let written = 0, writeFails = 0, crossPortalSkipped = 0;
 if (NO_WRITE) {
   console.error(`bd-bulk-scan: --no-write/--probe — skipping ${cleanJobs.length} Notion inserts + seen-cache save`);
 } else {
   for (const j of cleanJobs) {
+    if (!NO_SEEN && isCrossPortalDupe(j)) {
+      crossPortalSkipped++;
+      seen.add(canonicalUrl(j.url));  // remember this portal's URL for the same vacancy
+      console.error(`  drop[cross-portal] ${j.source_portal}: ${(j.company || "").slice(0, 30)} | ${(j.title || "").slice(0, 40)}`);
+      continue;
+    }
     try { await notionCreatePage(j); written++; } catch (e) { writeFails++; errors.push(`notion_write: ${e.message.slice(0,80)}`); }
   }
+  if (crossPortalSkipped) console.error(`bd-bulk-scan: cross-portal gate skipped ${crossPortalSkipped} already-tracked vacancies (same company+position in Notion window)`);
   saveSeen(seen);
 }
 
@@ -1438,6 +1624,7 @@ console.log(`JOBS_FOUND: ${cleanJobs.length}`);
 console.log(`JOBS_PER_PORTAL: ${portalBreakdown}`);
 console.log(`NOTION_ROWS_WRITTEN: ${written}`);
 console.log(`NOTION_WRITE_FAILURES: ${writeFails}`);
+console.log(`CROSS_PORTAL_SKIPPED: ${crossPortalSkipped}`);
 console.log(`SEEN_CACHE_SIZE: ${seen.size}`);
 console.log(`ELAPSED_SEC: ${elapsed}`);
 console.log(`ERRORS: ${errors.length}`);
