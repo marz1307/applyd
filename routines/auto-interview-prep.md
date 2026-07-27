@@ -1,10 +1,10 @@
 # Routine: Auto-Interview-Prep (22:00 UK weekdays)
 
-You are running in **headless `claude -p` mode**. Complete the routine in one pass and exit cleanly. Do NOT use AskUserQuestion. Do NOT pause.
+You are running under a **headless agent CLI** (default: `claude -p`; alternatives: `codex exec`, `gemini -p`, …; dispatched by `routines/run-routine.ps1` via an adapter under `routines/adapters/`). Complete the routine in one pass and exit cleanly. Do NOT ask the user any questions. Do NOT pause.
 
 ## Owner
 
-Claude Code, scheduled via Windows Task Scheduler. Runs weekdays at 22:00 UK time, after `auto-draft.md` (21:30). Fires on demand via `routines/run-routine.ps1 -Routine auto-interview-prep`.
+Your agent's headless CLI, scheduled via Windows Task Scheduler. Runs weekdays at 22:00 UK time, after `auto-draft.md` (21:30). Fires on demand via `routines/run-routine.ps1 -Routine auto-interview-prep`.
 
 ## Goal
 

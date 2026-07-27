@@ -1,6 +1,6 @@
 # CV Quality Rules — local distillation of IDE skill caveats
 
-**Why this file exists.** The IDE-level skills that produced the gold-standard CVs in `scripts/cv/generate-pdf-tailored.mjs` — `resume-writer`, `tech-cv-review`, `humanizer`, `recruiter-sim` — don't load under headless `claude -p`. The scheduled `auto-draft` and `auto-eval` routines can't invoke them. This file distils their caveats so the routines can apply the same standards inline.
+**Why this file exists.** The IDE-level skills that produced the gold-standard CVs in `scripts/cv/generate-pdf-tailored.mjs` — `resume-writer`, `tech-cv-review`, `humanizer`, `recruiter-sim` — don't load under a headless agent CLI (`claude -p`, `codex exec`, `gemini -p`, …). The scheduled `auto-draft` and `auto-eval` routines can't invoke them. This file distils their caveats so the routines can apply the same standards inline.
 
 `auto-draft.md` and `auto-eval.md` must **read this file once at start** and apply every rule below to every CV they generate or evaluate.
 
@@ -191,7 +191,7 @@ German rules: when a compound noun mixes English + German, all spaces become hyp
 
 ### 9.7 Banned characters / patterns (DACH-shipped content)
 - **0 em-dashes or en-dashes** in body prose. Use commas, colons, parentheses, or "bis". The single exception is the role-meta date-range line where the template uses `–` as part of the existing typography — leave that alone, but never introduce new dashes elsewhere.
-- 0 mentions of `Claude`, `Anthropic`, `KI-Assistenz`, `Generated with`, `Co-authored-by AI` anywhere shipped.
+- 0 mentions of any AI vendor / tooling attribution — `Claude`, `Anthropic`, `Codex`, `GPT`, `OpenAI`, `Gemini`, `Copilot`, `KI-Assistenz`, `Generated with`, `Co-authored-by AI` — anywhere shipped.
 - 0 coursework markers in shipped content (`Hausarbeit`, `Übung`, `Modul`, `Kursaufgabe`, `Studienarbeit`). `MSc-Abschlussarbeit` for the dissertation is fine.
 
 ### 9.8 Standard section / heading translations
@@ -238,4 +238,4 @@ If any check fails, fix before shipping.
 ## 10. What this file does NOT replace
 
 - Manual review by the user remains the gold standard. This file gets the auto-draft pipeline to ~85% of skill-driven quality without IDE plugins. The remaining 15% (subtle voice, market intuition, NDA-sensitive phrasing) is intentionally a human responsibility at the Stage-4 review checkpoint.
-- The IDE skills are still useful when the user is in an interactive Claude Code session — they auto-trigger on CV file events. This file is the *fallback for headless routines only*.
+- The IDE skills are still useful when the user is in an interactive agent session (Claude Code, Cursor, Zed, …) — they can auto-trigger on CV file events. This file is the *fallback for headless routines only*.

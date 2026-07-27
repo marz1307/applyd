@@ -1,10 +1,10 @@
 # Routine: Nightly Auto-Evaluation (21:00 UK weekdays)
 
-You are running in **headless `claude -p` mode**. No human is available to clarify or approve mid-run. Complete the routine in one pass and exit cleanly. Do NOT use AskUserQuestion. Do NOT prompt for confirmation. Do NOT pause and wait.
+You are running under a **headless agent CLI** (default: `claude -p`; alternatives: `codex exec`, `gemini -p`, …; dispatched by `routines/run-routine.ps1` via an adapter under `routines/adapters/`). No human is available to clarify or approve mid-run. Complete the routine in one pass and exit cleanly. Do NOT ask the user any questions. Do NOT prompt for confirmation. Do NOT pause and wait.
 
 ## Owner
 
-Claude Code, scheduled via Windows Task Scheduler. Runs weekdays at 21:00 UK time. Companion routine: `auto-draft.md` (21:30 UK, drafts artifacts for Stage 2 rows that cleared the floor).
+Your agent's headless CLI, scheduled via Windows Task Scheduler. Runs weekdays at 21:00 UK time. Companion routine: `auto-draft.md` (21:30 UK, drafts artifacts for Stage 2 rows that cleared the floor).
 
 ## Goal
 

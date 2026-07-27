@@ -1,10 +1,10 @@
 # Routine: System-Eval (observability + debugging)
 
-You are running in **headless `claude -p` mode** (or interactive). One pass. No AskUserQuestion. No pauses.
+You are running in **headless agent-CLI mode** (default: `claude -p`; alternatives: `codex exec`, `gemini -p`, …) or interactive. One pass. No user-facing questions. No pauses.
 
 ## Owner
 
-Claude Code. **Not on a fixed schedule.** Fires on demand via `routines/run-routine.ps1 -Routine system-eval`.
+Your agent's headless CLI. **Not on a fixed schedule.** Fires on demand via `routines/run-routine.ps1 -Routine system-eval`.
 
 ## Goal
 

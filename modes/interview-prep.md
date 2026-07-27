@@ -12,7 +12,7 @@ When the user asks to prep for an interview at a specific company+role, or when 
 
 ## Step 1 — Research
 
-Run these WebSearch queries. Extract structured data, not summaries. Cite sources for every claim.
+Run these web searches. Extract structured data, not summaries. Cite sources for every claim.
 
 The first round of most processes is a recruiter / HR screen, not a technical panel — so research has to cover both. Group queries by the audience they inform:
 

@@ -1,10 +1,10 @@
 # Routine: Daily Pace Check (17:00 UK weekdays)
 
-You are running in **headless `claude -p` mode**. No human is available to clarify or approve mid-run. Complete the routine in one pass and exit cleanly. Do NOT use AskUserQuestion. Do NOT prompt for confirmation. Do NOT pause and wait.
+You are running under a **headless agent CLI** (default: `claude -p`; alternatives: `codex exec`, `gemini -p`, …; dispatched by `routines/run-routine.ps1` via an adapter under `routines/adapters/`). No human is available to clarify or approve mid-run. Complete the routine in one pass and exit cleanly. Do NOT ask the user any questions. Do NOT prompt for confirmation. Do NOT pause and wait.
 
 ## Owner
 
-Claude Code, scheduled via Windows Task Scheduler. Runs weekdays at 17:00 UK time. Companion routines: `morning-scan.md` (07:00 UK), `lunchtime-scan.md` (12:30 UK).
+Your agent's headless CLI, scheduled via Windows Task Scheduler. Runs weekdays at 17:00 UK time. Companion routines: `morning-scan.md` (07:00 UK), `lunchtime-scan.md` (12:30 UK).
 
 ## Goal
 

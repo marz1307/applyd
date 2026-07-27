@@ -1,20 +1,22 @@
-# Routine: Chrome-Scan-Visible (Cowork-style, manual + scheduled trigger)
+# Routine: Chrome-Scan-Visible (interactive, manual + scheduled trigger)
 
-You are running INSIDE the user's open Claude Code session. Unlike the
+You are running INSIDE the user's open agent-CLI session. Unlike the
 headless routines (morning-scan, lunchtime-scan, etc.), this routine
-drives the user's actual Chrome browser via the `mcp__Claude_in_Chrome__*`
-MCP. The user must be present at the computer for sign-in steps.
+drives the user's actual Chrome browser via a browser-automation MCP
+(e.g. the Chrome MCP server bundled with your agent, or Playwright
+MCP). The user must be present at the computer for sign-in steps.
 
 ## Owner
 
 Triggered two ways:
-1. **Scheduled** via `mcp__scheduled-tasks__create_scheduled_task` to fire
-   inside the Claude Code app at a chosen weekday time (e.g. 09:00 UK).
-   If the app is closed at fire time, it runs on next launch (per the
-   scheduled-task system's catch-up behaviour). This satisfies the
-   "if system is off during schedule, must run when next connected" rule.
-2. **On-demand** — the user types `/career-ops chrome-scan` or similar
-   in the Claude Code chat, which invokes this routine.
+1. **Scheduled** via your agent's scheduled-task facility (or a Windows
+   Task Scheduler entry that opens the agent) to fire at a chosen
+   weekday time (e.g. 09:00 UK). If the app is closed at fire time, it
+   runs on next launch (per the scheduled-task system's catch-up
+   behaviour). This satisfies the "if system is off during schedule,
+   must run when next connected" rule.
+2. **On-demand** — the user types `/career-ops chrome-scan` (or the
+   equivalent mode invocation for their agent) in chat.
 
 ## Goal
 
@@ -49,7 +51,7 @@ The six portals:
 | 5 | **Welcome to the Jungle** | ✅ **MOVED TO bd-bulk-scan (2026-05-28).** Browser-based scraping is architecturally blocked: signed-in `/en/jobs?query=...` silently redirects to `/jobs-matches` which respects only saved profile preferences (not URL params), and signed-out HTTP hits a 202 bot-challenge interstitial (DataDome). Scraping now handled via Bright Data two-stage SERP→enrich (`bd-bulk-scan.mjs` portal `wttj`). | n/a — chrome-scan-visible **skips WTTJ entirely**; routine logs `PORTAL_MOVED_TO_BD` (informational, not an error) |
 | 6 | **Handshake** | `https://app.joinhandshake.com/job-search?keywords={role}&locations[]={city}` | **TBC** | ⏸ extension domain permission + typically .edu sign-in required; routine logs PERMISSION_DENIED / SIGN_IN_TIMED_OUT |
 
-**Access-grant flow:** on the first scrape attempt for a portal where navigation returns `permission_required:<domain>`, the LLM should screenshot the page, post a desktop notification (`mcp__Windows-MCP__Notification`) telling the user "Grant domain access to {domain} in the Claude-in-Chrome extension and re-trigger the routine," then skip that portal for this run (recorded in ERROR_DETAILS as `PERMISSION_DENIED: {domain}`).
+**Access-grant flow:** on the first scrape attempt for a portal where navigation returns `permission_required:<domain>`, the LLM should screenshot the page, post a desktop notification via your agent's OS-notification tool (if any) telling the user "Grant domain access to {domain} in your browser MCP extension and re-trigger the routine," then skip that portal for this run (recorded in ERROR_DETAILS as `PERMISSION_DENIED: {domain}`).
 
 ## Config
 
@@ -61,26 +63,28 @@ Read from `config/profile.yml`:
 
 ## Tools required
 
-- `mcp__Claude_in_Chrome__list_connected_browsers`, `select_browser`,
-  `tabs_context_mcp`, `tabs_create_mcp`, `navigate`, `find`,
-  `javascript_tool`, `computer` (screenshot, click, type), `read_page`,
-  `read_console_messages`.
-- `Bash` for invoking `node scripts/scan/cross-portal-dedup.mjs` and `node scripts/notion/notion-upload-file.mjs`.
-- `mcp__claude_ai_Notion__notion-create-pages` (or `mcp__33b...__notion-create-pages`).
-- `Read` for config/profile.yml.
+- A browser-automation MCP that exposes: list-connected-browsers,
+  select-browser, tab management (create, context), navigate,
+  find-by-selector, evaluate JavaScript in page, screenshot / click /
+  type, read-page, read-console-messages. Any equivalent works —
+  e.g. a Chrome-driver MCP or Playwright MCP.
+- A shell tool for invoking `node scripts/scan/cross-portal-dedup.mjs`
+  and `node scripts/notion/notion-upload-file.mjs`.
+- A Notion MCP that supports `notion-create-pages` (or fall back to the
+  REST helper in `scripts/notion/`).
+- File-read tool for `config/profile.yml`.
 
-If the Chrome MCP isn't connected, abort with
-`ROUTINE_ABORT: Chrome MCP not connected — install the Claude in Chrome extension and click 'Connect' inside Chrome`.
+If a browser MCP isn't connected, abort with
+`ROUTINE_ABORT: browser MCP not connected — install and connect your agent's browser-automation extension first`.
 
 ## Pre-flight
 
 1. `cwd` must be the repo root.
 2. `NOTION_TOKEN` env var present (for the post-scrape file uploads later).
-3. Chrome MCP reachable: `mcp__Claude_in_Chrome__list_connected_browsers`
-   returns at least one browser. Call `select_browser` on it.
-4. Create one new tab via `tabs_create_mcp`. Use this tab for all six
-   portals sequentially (close+reopen between portals to avoid stale
-   state).
+3. Browser MCP reachable: its list-connected-browsers call returns at
+   least one browser. Select it.
+4. Create one new tab. Use this tab for all six portals sequentially
+   (close+reopen between portals to avoid stale state).
 
 ## Steps
 
@@ -95,8 +99,8 @@ For each portal in the list above:
    `javascript_tool` to probe `document.readyState === 'complete'`).
 3. Detect signed-in state via portal-specific DOM selectors
    (see "Sign-in detection" below). If signed out:
-   - Post a desktop notification: `mcp__Windows-MCP__Notification`
-     or screenshot + tell the user in the Claude Code chat:
+   - Post a desktop notification via your agent's OS-notification tool
+     or screenshot + tell the user in the agent chat:
      `"⏸ Please sign in to {portal}. I'll wait up to 90 seconds."`
    - Poll signed-in state every 5 seconds for up to 90 seconds.
    - If still signed out after 90s, skip this portal — set
@@ -268,4 +272,4 @@ ERROR_DETAILS: |
 - Does NOT evaluate (auto-eval at 21:00 does that).
 - Does NOT generate PDFs.
 - Does NOT use Bright Data or Apify — pure Chrome MCP.
-- Does NOT touch headless `claude -p` (it requires user-present sign-in).
+- Does NOT run under a headless agent CLI (it requires user-present sign-in).

@@ -1,6 +1,6 @@
 # Routine: BD-Bulk-Scan (Bright Data Dataset Scraper)
 
-**PURE-SCRIPT ROUTINE (2026-05-28).** This routine is invoked directly via `node scripts/scan/bd-bulk-scan.mjs` by `run-routine.ps1` — there is no `claude -p` in the path. The script is fully deterministic and prints its own ROUTINE_CONTRACT block to stdout. This file is reference documentation only; the wrapper does NOT read it.
+**PURE-SCRIPT ROUTINE (2026-05-28).** This routine is invoked directly via `node scripts/scan/bd-bulk-scan.mjs` by `run-routine.ps1` — there is no agent-CLI LLM call in the path. The script is fully deterministic and prints its own ROUTINE_CONTRACT block to stdout. This file is reference documentation only; the wrapper does NOT read it.
 
 ## Owner
 
@@ -132,4 +132,4 @@ If a future run exceeds 1000 URLs in plan, abort with `ROUTINE_ABORT: bd-bulk-sc
 
 - Does not run auto-eval or auto-draft.
 - Does not commit to git.
-- Does not scrape individual job description pages — that's `auto-eval`'s job-by-job WebFetch on the Job URL.
+- Does not scrape individual job description pages — that's `auto-eval`'s job-by-job HTTP fetch on the Job URL.

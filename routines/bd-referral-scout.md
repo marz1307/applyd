@@ -1,8 +1,8 @@
 # Routine: bd-referral-scout (PURE-SCRIPT ROUTINE)
 
 > Reference documentation only. This routine is a **pure Node script**
-> (`bd-referral-scout.mjs`), NOT a `claude -p` prompt. `run-routine.ps1` invokes
-> the script directly (no LLM, no subscription/API cost beyond Bright Data).
+> (`bd-referral-scout.mjs`), NOT a headless-agent-CLI prompt. `run-routine.ps1`
+> invokes the script directly (no LLM, no subscription/API cost beyond Bright Data).
 
 ## What it does
 

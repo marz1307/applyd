@@ -72,7 +72,7 @@ If you have a live demo/dashboard (check profile.yml), offer access in applicati
 <!-- Research comp ranges for YOUR target roles -->
 
 **General guidance:**
-- Use WebSearch for current market data (Glassdoor, Levels.fyi, Blind)
+- Use web search for current market data (Glassdoor, Levels.fyi, Blind)
 - Frame by role title, not by skills
 - Contractor rates are typically 30-50% higher than employee base
 
