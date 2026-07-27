@@ -14,6 +14,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { normalizeStatus } from './metrics-core.mjs';
 
 const CAREER_OPS = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -39,28 +40,10 @@ const CADENCE = {
   interview_thankyou: 1,
 };
 
-// --- Status normalization (mirrors verify-pipeline.mjs) ---
-const ALIASES = {
-  'evaluada': 'evaluated', 'condicional': 'evaluated', 'hold': 'evaluated',
-  'evaluar': 'evaluated', 'verificar': 'evaluated',
-  'aplicado': 'applied', 'enviada': 'applied', 'aplicada': 'applied',
-  'applied': 'applied', 'sent': 'applied',
-  'respondido': 'responded',
-  'entrevista': 'interview',
-  'oferta': 'offer',
-  'rechazado': 'rejected', 'rechazada': 'rejected',
-  'descartado': 'discarded', 'descartada': 'discarded',
-  'cerrada': 'discarded', 'cancelada': 'discarded',
-  'no aplicar': 'skip', 'no_aplicar': 'skip', 'monitor': 'skip', 'geo blocker': 'skip',
-};
-
+// Status normalization comes from metrics-core.mjs (shared semantic layer).
+// ACTIONABLE_STATUSES stays local: "which statuses deserve a follow-up" is a
+// cadence policy, not a taxonomy fact.
 const ACTIONABLE_STATUSES = ['applied', 'responded', 'interview'];
-
-function normalizeStatus(raw) {
-  const clean = raw.replace(/\*\*/g, '').trim().toLowerCase()
-    .replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
-  return ALIASES[clean] || clean;
-}
 
 // --- Date helpers ---
 function today() {

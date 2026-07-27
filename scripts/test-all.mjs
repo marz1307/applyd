@@ -67,6 +67,7 @@ const scripts = [
   { name: 'scripts/tracker/dedup-tracker.mjs', expectExit: 0 },
   { name: 'scripts/tracker/merge-tracker.mjs', expectExit: 0 },
   { name: 'scripts/metrics/analyze-patterns.mjs --self-test', expectExit: 0 },
+  { name: 'scripts/metrics/metrics-core.test.mjs', expectExit: 0 },
   { name: 'scripts/doctor.mjs', expectExit: 0, allowFail: true },
 ];
 

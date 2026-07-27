@@ -32,6 +32,7 @@
 
 import { readFileSync, statSync, existsSync } from "node:fs";
 import yaml from "js-yaml";
+import { windowAdherence, LOCAL_APPLIED_STATUSES, normalizeStatus } from "./metrics-core.mjs";
 
 const args = process.argv.slice(2);
 const JSON_ONLY = args.includes("--json");
@@ -163,8 +164,7 @@ function parseApplicationsMd(path) {
 function countAppliedByDate(rows) {
   const counts = {};
   for (const r of rows) {
-    const status = (r.status || "").toLowerCase();
-    if (status === "applied" || status === "responded" || status === "interview" || status === "offer") {
+    if (LOCAL_APPLIED_STATUSES.includes(normalizeStatus(r.status))) {
       counts[r.date] = (counts[r.date] || 0) + 1;
     }
   }
@@ -225,46 +225,19 @@ function evaluate(window7) {
 
 // ── Apply-window adherence ──────────────────────────────────────────
 // Of the applications submitted in the last 7 days, what fraction landed
-// on a preferred day (Tue–Thu by default)? Volume alone is a poor metric
-// per the 2026-05-25 timing research — apps submitted on Fri/weekend are
-// ~50% as likely to convert. This metric makes that visible.
+// on a preferred day (Tue–Thu by default)? Volume alone is a poor metric —
+// apps submitted on Fri/weekend are ~50% as likely to convert. This metric
+// makes that visible.
+//
+// Delegates to metrics-core.windowAdherence — the shared definition, so
+// this number and any future funnel/dashboard adherence figure cannot
+// diverge. Output keys are contract-stable (WINDOW_* lines in
+// ROUTINE_CONTRACT).
 function computeWindowAdherence(rows) {
-  const dayCounts = { preferred: 0, acceptable: 0, avoid: 0, unknown: 0 };
-  let total = 0;
-  // Look at applied/responded/interview/offer rows in the last 7 days
-  const cutoff = new Date();
-  cutoff.setUTCDate(cutoff.getUTCDate() - 7);
-  for (const r of rows) {
-    const status = (r.status || "").toLowerCase();
-    if (!["applied", "responded", "interview", "offer"].includes(status)) continue;
-    const d = new Date(r.date + "T00:00:00Z");
-    if (isNaN(d.getTime()) || d < cutoff) continue;
-    // ISO weekday: getUTCDay() returns 0=Sun..6=Sat — convert to 1=Mon..7=Sun
-    const isoDow = d.getUTCDay() === 0 ? 7 : d.getUTCDay();
-    total++;
-    if (APPLY_PREFERRED_DAYS.includes(isoDow)) dayCounts.preferred++;
-    else if (APPLY_ACCEPTABLE_DAYS.includes(isoDow)) dayCounts.acceptable++;
-    else dayCounts.avoid++;
-  }
-  if (total === 0) {
-    return {
-      total_applied_7d: 0,
-      preferred_day_count: 0,
-      acceptable_day_count: 0,
-      avoid_day_count: 0,
-      adherence_pct: null,        // can't compute on empty sample
-      note: "no applied rows in last 7 days",
-    };
-  }
-  return {
-    total_applied_7d: total,
-    preferred_day_count: dayCounts.preferred,
-    acceptable_day_count: dayCounts.acceptable,
-    avoid_day_count: dayCounts.avoid,
-    // Adherence = fraction landing on preferred OR acceptable days.
-    adherence_pct: Math.round(((dayCounts.preferred + dayCounts.acceptable) / total) * 1000) / 10,
-    preferred_pct: Math.round((dayCounts.preferred / total) * 1000) / 10,
-  };
+  return windowAdherence(rows, {
+    preferredDays: APPLY_PREFERRED_DAYS,
+    acceptableDays: APPLY_ACCEPTABLE_DAYS,
+  });
 }
 
 // Cache freshness: applications.md is a local mirror of Notion. If it

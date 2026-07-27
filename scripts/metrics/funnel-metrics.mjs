@@ -29,6 +29,11 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import yaml from "js-yaml";
+import {
+  funnelHeadline, sliceBy as sliceByCore, scoreCalibration,
+  isApplied as inApplied, hasProgressed as progressed, isRejected as rejected,
+  hasResponded as responded, avg,
+} from "./metrics-core.mjs";
 
 const args = process.argv.slice(2);
 function arg(name, def = null) {
@@ -62,16 +67,8 @@ if (!DATABASE_ID) {
 }
 const ENDPOINT = `https://api.notion.com/v1/databases/${DATABASE_ID}/query`;
 
-// --- Stage taxonomy (mirrors the Notion Stage select) -----------------------
-const APPLIED_STAGES = [
-  "4. Applied", "5. Assessment/OA", "6. Phone screen",
-  "7. Tech interview", "8. Onsite/Final", "9. Offer", "Signed", "Rejected",
-];
-// "Got past the first stage" — an assessment or live human conversation.
-const PROGRESSED_STAGES = [
-  "5. Assessment/OA", "6. Phone screen", "7. Tech interview",
-  "8. Onsite/Final", "9. Offer", "Signed",
-];
+// Stage taxonomy, outcome classifiers, and rate math all come from
+// metrics-core.mjs (the shared semantic layer) — do not redefine them here.
 
 async function query(startCursor = null) {
   const body = { page_size: 100 };
@@ -115,47 +112,10 @@ function row(page) {
   };
 }
 
-// --- Classification ---------------------------------------------------------
-const inApplied = r => APPLIED_STAGES.includes(r.stage) || !!r.apply_date;
-const progressed = r => PROGRESSED_STAGES.includes(r.stage);
-const rejected = r => r.stage === "Rejected";
-// A response = the company did something: progressed us, rejected us, or a
-// response date is logged. Silence (still "4. Applied", no response date) = ghosted.
-const responded = r => progressed(r) || rejected(r) || !!r.response_date;
-
-function rate(n, d) { return d ? +(100 * n / d).toFixed(1) : null; }
-
-function sliceBy(rows, key) {
-  const groups = {};
-  for (const r of rows) {
-    const k = r[key] || "(unset)";
-    (groups[k] ||= []).push(r);
-  }
-  const out = [];
-  for (const [k, rs] of Object.entries(groups)) {
-    const cohort = rs.filter(inApplied);
-    if (cohort.length < MIN_COHORT) continue;
-    const resp = cohort.filter(responded).length;
-    const prog = cohort.filter(progressed).length;
-    const rej = cohort.filter(rejected).length;
-    out.push({
-      group: k,
-      applications: cohort.length,
-      responded: resp,
-      progressed: prog,
-      rejected: rej,
-      response_rate_pct: rate(resp, cohort.length),
-      screen_rate_pct: rate(prog, cohort.length),
-      rejection_rate_pct: rate(rej, cohort.length),
-    });
-  }
-  return out.sort((a, b) => b.applications - a.applications);
-}
-
-function avg(xs) {
-  const v = xs.filter(x => typeof x === "number");
-  return v.length ? +(v.reduce((a, b) => a + b, 0) / v.length).toFixed(1) : null;
-}
+// Classification predicates (inApplied/progressed/rejected/responded) are
+// aliased from metrics-core imports above. sliceBy wraps the shared helper
+// with this script's MIN_COHORT filter.
+const sliceBy = (rows, key) => sliceByCore(rows, key, { minCohort: MIN_COHORT });
 
 async function main() {
   const all = [];
@@ -169,29 +129,16 @@ async function main() {
   const funnel = {};
   for (const r of all) funnel[r.stage || "(unset)"] = (funnel[r.stage || "(unset)"] || 0) + 1;
 
-  const cohort = all.filter(inApplied);
-  const resp = cohort.filter(responded).length;
-  const prog = cohort.filter(progressed).length;
-  const rej = cohort.filter(rejected).length;
-  const ghosted = cohort.length - resp;
-
-  const headline = {
-    applications_submitted: cohort.length,
-    responses: resp,
-    response_rate_pct: rate(resp, cohort.length),
-    reached_first_stage_or_beyond: prog,
-    screen_rate_pct: rate(prog, cohort.length),
-    rejections: rej,
-    rejection_rate_pct: rate(rej, cohort.length),
-    silent_no_response: ghosted,
-  };
-
-  // Match-score reality check — proves the metric is non-predictive.
+  // Headline funnel + score calibration come from metrics-core (shared with
+  // dashboard/pace-alarm), so the same numbers surface everywhere.
+  const headline = funnelHeadline(all);
+  const calibration = scoreCalibration(all);
   const match_score_check = {
-    avg_score_progressed: avg(cohort.filter(progressed).map(r => r.match_score)),
-    avg_score_rejected: avg(cohort.filter(rejected).map(r => r.match_score)),
-    avg_score_silent: avg(cohort.filter(r => inApplied(r) && !responded(r)).map(r => r.match_score)),
-    note: "If rejected ≈ or > progressed, Match score is not predicting outcomes. Manage to response/screen rate instead.",
+    avg_score_progressed: calibration.avg_score_by_outcome.progressed,
+    avg_score_rejected: calibration.avg_score_by_outcome.rejected,
+    avg_score_silent: calibration.avg_score_by_outcome.silent,
+    verdict: calibration.verdict,
+    note: calibration.note,
   };
 
   const result = {
@@ -200,6 +147,7 @@ async function main() {
     funnel,
     headline,
     match_score_check,
+    calibration,
     by_referral: sliceBy(all, "referral"),
     by_source_portal: sliceBy(all, "portal"),
     by_country: sliceBy(all, "country"),
