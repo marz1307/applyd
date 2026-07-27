@@ -1,267 +1,62 @@
-# Career-Ops — AI Job Search Pipeline
-
-## Origin
+# Career-Ops — Claude Code overlay
 
-This system was originally built and used by [santifer](https://santifer.io) to evaluate 740+ job offers, generate 100+ tailored CVs, and land a Head of Applied AI role. The portfolio that goes with the original system is also open source: [cv-santiago](https://github.com/santifer/cv-santiago).
-
-**It will work out of the box, but it's designed to be made yours.** If the archetypes don't match your career, the modes are in the wrong language, or the scoring doesn't fit your priorities — just ask. You (AI Agent) can edit the user's files. The user says "change the archetypes to data engineering roles" and you do it. That's the whole point.
-
-## Data Contract (CRITICAL)
-
-There are two layers. Read `DATA_CONTRACT.md` for the full list.
-
-**User Layer (NEVER auto-updated, personalization goes HERE):**
-- `cv.md`, `config/profile.yml`, `modes/_profile.md`, `article-digest.md`, `portals.yml`
-- `data/*`, `reports/*`, `output/*`, `interview-prep/*`
+> **This file layers Claude-Code-specific bindings on top of `AGENTS.md`. Read `AGENTS.md` first.** Everything project-wide — architecture, data contract, ethics, offer-verification rules, onboarding, TSV format, canonical states, Notion contract — lives there and applies to every agent equally.
 
-**System Layer (auto-updatable, DON'T put user data here):**
-- `modes/_shared.md`, `modes/oferta.md`, all other modes
-- `CLAUDE.md`, `*.mjs` scripts, `dashboard/*`, `templates/*`, `batch/*`
+This overlay lists only the bits that are specific to Claude Code:
 
-**THE RULE: When the user asks to customize anything (archetypes, narrative, negotiation scripts, proof points, location policy, comp targets), ALWAYS write to `modes/_profile.md` or `config/profile.yml`. NEVER edit `modes/_shared.md` for user-specific content.** This ensures system updates don't overwrite their customizations.
-
-## What is career-ops
-
-AI-powered job search automation built on Claude Code: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing.
-
-### Main Files
+## Tool bindings
 
-| File | Function |
-|------|----------|
-| `data/applications.md` | Application tracker |
-| `data/pipeline.md` | Inbox of pending URLs |
-| `data/scan-history.tsv` | Scanner dedup history |
-| `portals.yml` | Query and company config |
-| `templates/cv-template.html` | HTML template for CVs |
-| `templates/cv-template.tex` | LaTeX/Overleaf template for CVs |
-| `scripts/cv/generate-pdf.mjs` | Playwright: HTML to PDF |
-| `scripts/cv/generate-latex.mjs` | LaTeX CV validator + pdflatex compiler |
-| `scripts/cv/cv-qa.mjs` | LLM-powered post-draft QA over a generated CV (and optional cover letter) against the JD + `modes/cv-quality-rules.md`. Runs on your Claude subscription via the `claude` CLI (`claude -p`) — no API key. Auto-patches verbatim fixes, bounded cover-letter regen loop. Skips gracefully (exit 0) if the CLI is unavailable; `CLAUDE_CLI` overrides the binary path, `--model` / `CV_QA_MODEL` override the model (default `claude-sonnet-5`). |
-| `scripts/scan/role-taxonomy.mjs` | Optional, opt-in read-only taxonomy consumer. Reads `config/role-taxonomy.yml` (copy from `config/role-taxonomy.example.yml`) and derives the scanner's `title_filter` (core+adjacent → positive, exclusions → negative, `watch` behind `--include-watch`) + archetype/tier classification for scoring. Absent → scanner falls back to `portals.yml title_filter`. Hardcodes no role names. |
-| `article-digest.md` | Compact proof points from portfolio (optional) |
-| `interview-prep/story-bank.md` | Accumulated STAR+R stories across evaluations |
-| `interview-prep/{company}-{role}.md` | Company-specific interview intel reports |
-| `scripts/metrics/analyze-patterns.mjs` | Pattern analysis script (JSON output) |
-| `scripts/metrics/followup-cadence.mjs` | Follow-up cadence calculator (JSON output) |
-| `scripts/metrics/funnel-metrics.mjs` | Real outcome KPIs from the Notion Applications DB — response / screen / rejection rate, sliced by source portal, country, referral, sponsorship, plus a Match-score reality check. Needs `NOTION_TOKEN`. `--json`, `--min-cohort N`. |
-| `scripts/metrics/caveats-audit.mjs` | Zero-LLM lint over generated CVs / cover letters in `output/` for `cv-quality-rules.md` violations (banned vocab, banned constructions, em/en dashes). `--root`, `--json`, `--top N`. |
-| `data/follow-ups.md` | Follow-up history tracker |
-| `scripts/scan/scan.mjs` | Zero-token portal scanner — hits Greenhouse/Ashby/Lever APIs directly, zero LLM cost |
-| `scripts/scan/sponsor-check.mjs` | UK licensed-sponsor lookup. For candidates who need UK sponsorship (`config/profile.yml → work_eligibility.needs_uk_sponsorship: true`), matches an employer against the local gov.uk Register of licensed sponsors (`data/uk-sponsor-register/`, normalised + fuzzy) to tell whether it can legally sponsor a Skilled Worker visa. Drives the `uk-sponsor-licensed` / `uk-sponsor-route-mismatch` / `uk-no-sponsor-licence` tags in `oferta.md` Step 6. `--company "X" --json`, `--rebuild` after re-download. Zero LLM cost. |
-| `scripts/scan/check-liveness.mjs` | Job posting liveness checker |
-| `scripts/scan/liveness-core.mjs` | Shared liveness logic (expired signals win over generic Apply text) |
-| `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy), plus `## Machine Summary` YAML for downstream scripts. Header includes `**Legitimacy:** {tier}`. |
-
-### First Run — Onboarding (IMPORTANT)
+When a mode says a generic thing like "fetch the JD", "search the repo", "read a file", or "invoke another mode", use Claude Code's tools:
 
-**Before doing ANYTHING else, check if the system is set up.** Run these checks silently every time a session starts:
+| Operation (from `modes/*.md`) | Claude Code tool |
+|---|---|
+| "Fetch a URL / JD" (static page fallback) | `WebFetch` |
+| "Search the repo for X" | `Grep` |
+| "Read a file / image / PDF" | `Read` |
+| "Write / edit a file" | `Write` / `Edit` |
+| "Verify a job posting is live" (interactive) | Playwright MCP: `browser_navigate` + `browser_snapshot` |
+| "Run a background research task" | `Task` |
+| "Run another mode" (e.g. `oferta`, `pdf`) | `Skill` tool or `/career-ops <mode>` slash command |
+| "Web search" | `WebSearch` |
+| "Batch process without a session" | `claude -p "..."` (headless) |
 
-1. Does `cv.md` exist?
-2. Does `config/profile.yml` exist (not just profile.example.yml)?
-3. Does `modes/_profile.md` exist (not just _profile.template.md)?
-4. Does `portals.yml` exist (not just templates/portals.example.yml)?
-
-If `modes/_profile.md` is missing, copy from `modes/_profile.template.md` silently. This is the user's customization file — it will never be overwritten by updates.
-
-**If ANY of these is missing, enter onboarding mode.** Do NOT proceed with evaluations, scans, or any other mode until the basics are in place. The slash-command skill at `.claude/skills/career-ops/SKILL.md` automates this flow when the user types `/career-ops`.
-
-#### Step 1: CV (required)
-If `cv.md` is missing, ask:
-> "I don't have your CV yet. You can either:
-> 1. Paste your CV here and I'll convert it to markdown
-> 2. Paste a path to your CV file (PDF / DOCX / MD) and I'll read it
-> 3. Paste your LinkedIn URL and I'll extract the key info
-> 4. Tell me about your experience and I'll draft a CV for you
->
-> Which do you prefer?"
-
-Create `cv.md` from whatever they provide. Make it clean markdown with standard sections (Summary, Experience, Projects, Education, Skills).
-
-#### Step 2: Profile (required)
-If `config/profile.yml` is missing, copy from `config/profile.example.yml` and then ask:
-> "I need a few details to personalize the system:
-> - Your full name and email
-> - Your location and timezone
-> - What roles are you targeting? (e.g., 'Senior Backend Engineer', 'AI Product Manager')
-> - Your salary target range
->
-> I'll set everything up for you."
-
-Fill in `config/profile.yml` with their answers. For archetypes and targeting narrative, store the user-specific mapping in `modes/_profile.md` or `config/profile.yml` rather than editing `modes/_shared.md`.
-
-#### Step 3: Portals (recommended)
-If `portals.yml` is missing:
-> "I'll set up the job scanner with the bundled company list. Want me to customize the search keywords for your target roles?"
-
-Copy `templates/portals.example.yml` → `portals.yml`. If they gave target roles in Step 2, update `title_filter.positive` to match.
+Modes generally use generic wording (e.g. "fetch the URL and read the JD") so the same instructions run under other agents. When a mode gives an example that names a specific Claude tool, treat it as an example, not as an exclusion.
 
-#### Step 4: Bright Data (optional but recommended)
-If `BRIGHTDATA_API_KEY` is not set, ask:
-> "I can scan portals like LinkedIn, Indeed, and Welcome to the Jungle through Bright Data. If you have a Bright Data API key, paste it now and I'll write it into your `.env`. If you'd rather skip, I'll fall back to free ATS endpoints (Greenhouse / Ashby / Lever / Workable)."
-
-Write the key to `.env` (gitignored) — never to `config/profile.yml`.
+## Plugin marketplace
 
-#### Step 5: Tracker
-If `data/applications.md` doesn't exist, create it:
-```markdown
-# Applications Tracker
+career-ops installs as a Claude Code plugin. The marketplace entry points must stay at repo root — moving them breaks `/plugin install marz1307/career-ops`:
 
-| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
-|---|------|---------|------|-------|--------|-----|--------|-------|
-```
+- `.claude-plugin/marketplace.json` + `.claude-plugin/plugin.json`
+- `.mcp.json`
+- `SKILL.md`
+- `CLAUDE.md`
+- `AGENTS.md`
 
-#### Step 6: Get to know the user (important for quality)
+The `/career-ops` slash command is defined via `SKILL.md` and the plugin manifest. Onboarding, mode routing, and the recurring-scan setup are all reachable from that entry point.
 
-After the basics are set up, proactively ask for more context. The more you know, the better your evaluations will be:
+## MCP servers
 
-> "The basics are ready. But the system works much better when it knows you well. Can you tell me more about:
-> - What makes you unique? What's your 'superpower' that other candidates don't have?
-> - What kind of work excites you? What drains you?
-> - Any deal-breakers? (e.g., no on-site, no startups under 20 people, no Java shops)
-> - Your best professional achievement — the one you'd lead with in an interview
-> - Any projects, articles, or case studies you've published?
->
-> The more context you give me, the better I filter. Think of it as onboarding a recruiter — the first week I need to learn about you, then I become invaluable."
+Project-level MCP config lives in `.mcp.json`. Currently declares `brightdata` (via `npx -y @brightdata/mcp`, env var `API_TOKEN=${BRIGHTDATA_API_KEY}`).
 
-Store any insights the user shares in `config/profile.yml` (under narrative), `modes/_profile.md`, or in `article-digest.md` if they share proof points. Do not put user-specific archetypes or framing into `modes/_shared.md`.
+Notion is reached one of two ways depending on context:
+- **Cowork / interactive Claude sessions:** the account-level Notion MCP with tool prefix `mcp__claude_ai_Notion__*` (or the community server, `mcp__notion__*`).
+- **Scheduled routines:** REST via `scripts/notion/*.mjs` + `NOTION_TOKEN`. The wrapper (`routines/run-routine.ps1`) launches Claude with `--strict-mcp-config --mcp-config <repo>/.mcp.json`, so ONLY the brightdata server loads — every account-level MCP is excluded from a routine's context.
 
-**After every evaluation, learn.** If the user says "this score is too high, I wouldn't apply here" or "you missed that I have experience in X", update your understanding in `modes/_profile.md`, `config/profile.yml`, or `article-digest.md`. The system should get smarter with every interaction without putting personalization into system-layer files.
+## Headless routines
 
-#### Step 7: Ready
-Once all files exist, confirm:
-> "You're all set! You can now:
-> - Paste a job URL to evaluate it
-> - Run `/career-ops scan` to search portals
-> - Run `/career-ops` to see all commands
->
-> Everything is customizable — just ask me to change anything."
+Scheduled unattended runs use `claude -p` under `routines/run-routine.ps1`. The wrapper handles per-routine allowlists (`--allowedTools`), strict MCP config, subscription-vs-API-credit billing guards, per-routine timeouts, self-healing retries, and structured alerts. This is the reference implementation of the multi-agent dispatcher described in `AGENTS.md → Headless / batch mode`; other agent CLIs are wired via sibling adapters under `routines/adapters/`.
 
-Then suggest automation:
-> "Want me to scan for new offers automatically? I can set up a recurring scan every few days so you don't miss anything. Just say 'scan every 3 days' and I'll configure it."
+Notable Claude-specific gotchas the wrapper defends against:
+- `claude -p` in headless mode needs a long-lived token from `claude setup-token` — short-lived interactive OAuth tokens can't refresh under `-p`.
+- `ANTHROPIC_API_KEY` in the process env silently switches `claude.exe` to API-credit billing instead of the subscription. The wrapper strips it before launching.
+- Windows Task Scheduler defaults (`DisallowStartIfOnBatteries: true`) will silently no-op headless runs on laptops. New tasks need `AllowStartIfOnBatteries` + `DontStopIfGoingOnBatteries` + `StartWhenAvailable`.
 
-If the user accepts, use the `/loop` or `/schedule` skill (if available) to set up a recurring `/career-ops scan`. If those aren't available, suggest adding a cron job or remind them to run `/career-ops scan` periodically.
+## Skills and skill-style helpers
 
-### Personalization
+Modes are consumable both by the `Skill` tool and by any agent that reads the file. If you're running under Claude Code and a mode's flow refers to another mode, prefer the `Skill` invocation — it loads the mode file and follows it without you having to paste the whole prompt.
 
-This system is designed to be customized by YOU (AI Agent). When the user asks you to change archetypes, translate modes, adjust scoring, add companies, or modify negotiation scripts — do it directly. You read the same files you use, so you know exactly what to edit.
-
-**Common customization requests:**
-- "Change the archetypes to [backend/frontend/data/devops] roles" → edit `modes/_profile.md` or `config/profile.yml`
-- "Add these companies to my portals" → edit `portals.yml`
-- "Update my profile" → edit `config/profile.yml`
-- "Change the CV template design" → edit `templates/cv-template.html`
-- "Adjust the scoring weights" → edit `modes/_profile.md` for user-specific weighting, or edit `modes/_shared.md` and `batch/batch-prompt.md` only when changing the shared system defaults for everyone
+## Batch worker
 
-### Skill Modes
+`batch/batch-prompt.md` is the self-contained prompt for `claude -p` parallel evaluations. See `AGENTS.md → Headless / batch mode` for the agent-neutral dispatcher.
 
-| If the user... | Mode |
-|----------------|------|
-| Pastes JD or URL | auto-pipeline (evaluate + report + PDF + tracker) |
-| Asks to evaluate offer | `oferta` |
-| Asks to compare offers | `ofertas` |
-| Wants LinkedIn outreach | `contacto` |
-| Asks for company research | `deep` |
-| Preps for interview at specific company | `interview-prep` |
-| Wants to generate CV/PDF | `pdf` |
-| Evaluates a course/cert | `training` |
-| Evaluates portfolio project | `project` |
-| Asks about application status | `tracker` |
-| Fills out application form | `apply` |
-| Searches for new offers | `scan` |
-| Processes pending URLs | `pipeline` |
-| Batch processes offers | `batch` |
-| Asks about rejection patterns or wants to improve targeting | `patterns` |
-| Asks about follow-ups or application cadence | `followup` |
-
-### CV Source of Truth
-
-- `cv.md` in project root is the canonical CV
-- `article-digest.md` has detailed proof points (optional)
-- **NEVER hardcode metrics** — read them from these files at evaluation time
-
----
-
-## Ethical Use — CRITICAL
-
-**This system is designed for quality, not quantity.** The goal is to help the user find and apply to roles where there is a genuine match — not to spam companies with mass applications.
-
-- **NEVER submit an application without the user reviewing it first.** Fill forms, draft answers, generate PDFs — but always STOP before clicking Submit/Send/Apply. The user makes the final call.
-- **Strongly discourage low-fit applications.** The system uses a hard floor of `triage.score_floor` (Match score 0–100; default 70). Rows below the floor are auto-moved to `Not pursuing` and never drafted. Only override with a specific reason (recruiter referral, internal lead).
-- **Quality over speed.** A well-targeted application to 5 companies beats a generic blast to 50. Guide the user toward fewer, better applications.
-- **Respect recruiters' time.** Every application a human reads costs someone's attention. Only send what's worth reading.
-
----
-
-## Offer Verification — MANDATORY
-
-**NEVER trust WebSearch/WebFetch to verify if an offer is still active.** ALWAYS use Playwright:
-1. `browser_navigate` to the URL
-2. `browser_snapshot` to read content
-3. Only footer/navbar without JD = closed. Title + description + Apply = active.
-
-**Exception for batch workers (`claude -p`):** Playwright is not available in headless pipe mode. Use WebFetch as fallback and mark the report header with `**Verification:** unconfirmed (batch mode)`. The user can verify manually later.
-
----
-
-## Stack and Conventions
-
-- Node.js (mjs modules), Playwright (PDF + scraping), YAML (config), HTML/CSS (template), Markdown (data)
-- Scripts in `.mjs`, configuration in YAML
-- Output in `output/` (gitignored), Reports in `reports/`
-- JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md)
-- Batch in `batch/` (gitignored except scripts and prompt)
-- Report numbering: sequential 3-digit zero-padded, max existing + 1
-- **RULE: After each batch of evaluations, run `node scripts/tracker/merge-tracker.mjs`** to merge tracker additions and avoid duplications.
-- **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
-
-### TSV Format for Tracker Additions
-
-Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slug}.tsv`. Single line, 9 tab-separated columns:
-
-```
-{num}\t{date}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}
-```
-
-**Column order (IMPORTANT — status BEFORE score):**
-1. `num` — sequential number (integer)
-2. `date` — YYYY-MM-DD
-3. `company` — short company name
-4. `role` — job title
-5. `status` — canonical status (e.g., `Evaluated`)
-6. `score` — format `X.X/5` (e.g., `4.2/5`)
-7. `pdf` — `✅` or `❌`
-8. `report` — markdown link `[num](reports/...)`
-9. `notes` — one-line summary
-
-**Note:** In applications.md, score comes BEFORE status. The merge script handles this column swap automatically.
-
-### Pipeline Integrity
-
-1. **NEVER edit applications.md to ADD new entries** — Write TSV in `batch/tracker-additions/` and `scripts/tracker/merge-tracker.mjs` handles the merge.
-2. **YES you can edit applications.md to UPDATE status/notes of existing entries.**
-3. All reports MUST include `**URL:**` in the header (between Score and PDF). Include `**Legitimacy:** {tier}` (see Block G in `modes/oferta.md`).
-4. All statuses MUST be canonical (see `templates/states.yml`).
-5. Health check: `node scripts/tracker/verify-pipeline.mjs`
-6. Normalize statuses: `node scripts/tracker/normalize-statuses.mjs`
-7. Dedup: `node scripts/tracker/dedup-tracker.mjs`
-
-### Canonical States (applications.md)
-
-**Source of truth:** `templates/states.yml`
-
-| State | When to use |
-|-------|-------------|
-| `Evaluated` | Report completed, pending decision |
-| `Applied` | Application sent |
-| `Responded` | Company responded |
-| `Interview` | In interview process |
-| `Offer` | Offer received |
-| `Rejected` | Rejected by company |
-| `Discarded` | Discarded by candidate or offer closed |
-| `SKIP` | Doesn't fit, don't apply |
-
-**RULES:**
-- No markdown bold (`**`) in status field
-- No dates in status field (use the date column)
-- No extra text (use the notes column)
 @AGENTS.md
