@@ -81,6 +81,9 @@ bun.lock
 .claude/memory/
 career-dashboard
 .test-dashboard-build
+
+# Local-only session-bridge note (rewritten each session, never shipped)
+HANDOFF.md
 package-lock.json
 # CV generator outputs
 cv/output/
