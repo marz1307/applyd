@@ -1,7 +1,8 @@
 # career-ops
 
-> **Your AI job-search co-pilot, installed as a Claude Code skill.**
+> **Your AI job-search co-pilot.**
 > Scans portals, scores every posting against your profile, drafts tailored CVs and cover letters, logs everything to a Notion tracker — and stops before clicking Submit so you stay in control.
+> Runs natively as a Claude Code plugin and works out of the box under Codex CLI, Cursor, Zed, OpenCode, Gemini CLI, and Aider via the shared [`AGENTS.md`](AGENTS.md) contract.
 
 [![Made for Claude Code](https://img.shields.io/badge/Made_for-Claude_Code-000?style=flat&logo=anthropic&logoColor=white)](https://www.claude.com/product/claude-code)
 [![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white)](https://nodejs.org)
@@ -23,6 +24,14 @@
 - 🎯 **Interview prep** — STAR+R stories, company intel, JD-tailored question bank
 - ⏰ **Scheduled scans** — pick a time of day, it runs itself
 - 🛑 **Never auto-submits** — fills forms, drafts answers, stops at Submit
+
+---
+
+## 🤖 Supported agents
+
+The project contract lives in [`AGENTS.md`](AGENTS.md) and is agent-neutral. Claude Code is the reference implementation (that's what the quickstart below covers), and the same modes and routines run under **Codex CLI, Cursor, Zed, OpenCode, Gemini CLI, and Aider** via sibling overlay files ([`GEMINI.md`](GEMINI.md), [`.cursor/rules/career-ops.mdc`](.cursor/rules/career-ops.mdc), [`.aider.conf.yml`](.aider.conf.yml)). Headless scheduled routines dispatch through [`routines/run-routine.ps1`](routines/run-routine.ps1) → `routines/adapters/${CAREER_OPS_AGENT_CLI}.ps1`, defaulting to Claude.
+
+Full setup notes per agent, MCP wiring, and known caveats live in [`docs/AGENT_COMPAT.md`](docs/AGENT_COMPAT.md).
 
 ---
 

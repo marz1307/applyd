@@ -1,0 +1,6 @@
+# aider config for career-ops
+# See AGENTS.md for the primary project contract.
+read:
+  - AGENTS.md
+  - modes/_shared.md
+  - modes/_profile.template.md
