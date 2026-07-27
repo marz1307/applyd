@@ -1,13 +1,22 @@
 # run-routine.ps1
 #
 # Wrapper invoked by Windows Task Scheduler to run a career-ops routine
-# in headless `claude -p` mode and capture its output to data/routine-logs/.
+# under a headless agent CLI and capture its output to data/routine-logs/.
+#
+# AGENT-CLI DISPATCH (v2.3.0):
+#   - Reads $env:CAREER_OPS_AGENT_CLI (default: "claude") to pick an
+#     adapter under routines/adapters/${CLI}.ps1.
+#   - The adapter owns the CLI-specific invocation (flags, auth, MCP);
+#     the wrapper keeps log-capture, contract validation, retries,
+#     dashboard rebuild, and Windows Task Scheduler integration.
+#   - claude.ps1 is the reference adapter. codex.ps1 and gemini.ps1
+#     ship as best-effort stubs — verify locally before scheduling.
 #
 # Hardened wrapper (post-2026-05-25 critique):
 #   - Per-routine MCP allowlists (least privilege; M4)
-#   - Hard wall-clock timeout per routine (C2; kills runaway claude -p)
-#   - Output-contract validation — exit code from claude -p is NOT trusted;
-#     log MUST contain a `--- ROUTINE_CONTRACT ---` block or wrapper exits 4 (C1)
+#   - Hard wall-clock timeout per routine (C2; kills runaway CLI)
+#   - Output-contract validation — CLI exit code is NOT trusted; log
+#     MUST contain a `--- ROUTINE_CONTRACT ---` block or wrapper exits 4 (C1)
 #   - BRIGHTDATA_API_KEY preflight for routines that need it (H4)
 #   - Wrapper-trace lives outside the gitignored data/routine-logs/ so the
 #     forensic record survives a `rm -rf data/routine-logs/` (L2)
@@ -38,8 +47,14 @@ $ErrorActionPreference = "Continue"
 
 # ── Paths ────────────────────────────────────────────────────────────
 $repoRoot   = $PSScriptRoot | Split-Path
-$claudeExe  = (Get-Command claude -ErrorAction SilentlyContinue).Source
-if (-not $claudeExe) { $claudeExe = Join-Path $env:USERPROFILE ".local\bin\claude.exe" }
+# Which agent CLI drives this routine. Default is "claude"; override
+# by exporting CAREER_OPS_AGENT_CLI=codex|gemini|... in the environment
+# before invocation. The named adapter must exist at
+# routines/adapters/<cli>.ps1.
+$agentCli   = if (-not [string]::IsNullOrEmpty($env:CAREER_OPS_AGENT_CLI)) {
+                  $env:CAREER_OPS_AGENT_CLI.ToLower()
+              } else { "claude" }
+$adapterPath = Join-Path $repoRoot "routines\adapters\$agentCli.ps1"
 $promptPath = Join-Path $repoRoot "routines\$Routine.md"
 $logDir     = Join-Path $repoRoot "data\routine-logs"
 $traceDir   = Join-Path $repoRoot "data"  # NOT gitignored at this level
@@ -205,7 +220,10 @@ if ($isPureScript) {
     if (-not (Test-Path $scriptPath)) { Fail 2 "Script not found: $scriptPath" }
 } else {
     if (-not (Test-Path $promptPath)) { Fail 2 "Prompt not found: $promptPath" }
-    if (-not (Test-Path $claudeExe))  { Fail 2 "Claude not found: $claudeExe" }
+    if (-not (Test-Path $adapterPath)) {
+        $available = (Get-ChildItem (Join-Path $repoRoot 'routines\adapters') -Filter '*.ps1' -ErrorAction SilentlyContinue | ForEach-Object { $_.BaseName }) -join ', '
+        Fail 2 "Adapter not found: $adapterPath (CAREER_OPS_AGENT_CLI=$agentCli). Available adapters: $available"
+    }
 }
 if (-not (Test-Path $logDir))     { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 
@@ -337,7 +355,7 @@ function Write-Alert($routine, $mode, $exitCode, $logPath, $attempts, $finalStat
 }
 
 # ── Header ──────────────────────────────────────────────────────────
-$launcherLabel = if ($isPureScript) { "node $scriptName (pure-script, no LLM)" } else { "claude -p $claudeExe" }
+$launcherLabel = if ($isPureScript) { "node $scriptName (pure-script, no LLM)" } else { "agent-cli:$agentCli (adapter: $adapterPath)" }
 $header = @"
 ================================================================================
 ROUTINE_START: $Routine
@@ -359,86 +377,38 @@ BACKOFF_SEC: $backoffSec
 "@
 $header | Out-File -FilePath $logPath -Encoding UTF8
 
-# ── Launch claude -p with a hard timeout ─────────────────────────────
+# ── Build launch command ─────────────────────────────────────────────
 # Use System.Diagnostics.Process directly: PowerShell's Start-Process
 # double-quotes -ArgumentList items, which corrupts cmd.exe's /c parser
 # when the inner command itself contains quoted paths.
 #
-# Quoting note: cmd's /c parser has a rule that with MORE than two quote
-# characters and any special chars, it strips the OUTER pair and parses
-# the rest with embedded quotes preserved. So we need to wrap the whole
-# command in an extra outer `"..."` pair — the `""$claudeExe""` is
-# `outer-quote + inner-opening-quote + path + inner-closing-quote`. See
-# `cmd /?` for the gory details.
+# Two launch paths:
+#   1. Pure-script routines invoke `node <script>` directly — no LLM,
+#      no MCP, no adapter. Deterministic; script owns its ROUTINE_CONTRACT.
+#   2. Prompt routines dispatch to the agent-CLI adapter selected by
+#      $env:CAREER_OPS_AGENT_CLI (default: claude). The adapter owns
+#      the CLI-specific flags, auth, and MCP config; the wrapper stays
+#      neutral.
 if ($isPureScript) {
     # Pure-script path: invoke `node <script>` directly. The script is
     # expected to print its own ROUTINE_CONTRACT block to stdout, which the
-    # validator below greps for verbatim. No claude -p, no MCP, no LLM in
-    # the path — eliminates the "LLM paraphrased the contract" failure mode.
+    # validator below greps for verbatim.
     $cmdArgs = "/c node `"$scriptName`" >> `"$logPath`" 2>&1"
 } else {
-    # ── BILLING ISOLATION (critical) ────────────────────────────────────
-    # auto-eval and auto-draft run on the Claude Code SUBSCRIPTION, not the
-    # metered API. claude.exe switches to API-credit billing whenever it sees
-    # ANTHROPIC_API_KEY in its environment — and PowerShell auto-loads the
-    # User-scope key into every session, so it leaks in by default. That made
-    # claude -p silently bill Opus-tier API credits and exhausted the balance
-    # (2026-06-17). Strip the key from the Process env here so claude.exe falls
-    # back to its OAuth subscription login (model = whatever Claude Code uses,
-    # billed to the subscription, not credits). As of 2026-07-01 cv-qa is ALSO
-    # subscription-only by default (it ignores ANTHROPIC_API_KEY and runs QA on
-    # the Opus 4.8 `claude -p` subscription); the metered Haiku API is opt-in via
-    # CAREEROPS_QA_USE_API=1. So NOTHING in the pipeline bills API credits unless
-    # that flag is explicitly set. Strip here regardless (belt-and-suspenders).
-    [System.Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", $null, "Process")
-
-    # ── PREFLIGHT: billing-leak guard ───────────────────────────────────
-    # Fail LOUD if the API key is still visible to the about-to-launch
-    # claude.exe — a leaked key means Opus-tier API-credit billing instead of
-    # the subscription. Belt-and-suspenders on the strip above: covers the key
-    # arriving via a here-string, a parent re-export, or a future refactor.
-    $leakedKey = [System.Environment]::GetEnvironmentVariable("ANTHROPIC_API_KEY", "Process")
-    if (-not [string]::IsNullOrEmpty($leakedKey)) {
-        Fail 7 "BILLING LEAK: ANTHROPIC_API_KEY is still set in the process env for claude -p routine '$Routine'. claude.exe would bill API credits (Opus-tier) instead of the subscription. Aborting to protect credits."
-    }
-    # Confirm claude.exe has a real SUBSCRIPTION OAuth login (the claudeAiOauth
-    # block, written by `claude` interactive login), not just MCP server tokens.
-    # With ANTHROPIC_API_KEY stripped, this is the only thing that authenticates
-    # claude -p — and it's what keeps billing on the Max plan instead of credits.
-    $claudeCredsCandidates = @(
-        (Join-Path $env:USERPROFILE ".claude\.credentials.json"),
-        (Join-Path $env:APPDATA     "claude\.credentials.json"),
-        (Join-Path $env:USERPROFILE ".config\claude\.credentials.json")
-    )
-    $subscriptionType = $null
-    foreach ($cand in $claudeCredsCandidates) {
-        if (Test-Path $cand) {
-            try {
-                $creds = Get-Content $cand -Raw | ConvertFrom-Json
-                if ($creds.claudeAiOauth -and $creds.claudeAiOauth.accessToken) {
-                    $subscriptionType = $creds.claudeAiOauth.subscriptionType
-                    break
-                }
-            } catch {}
-        }
-    }
-    if ([string]::IsNullOrEmpty($subscriptionType)) {
-        Fail 7 "NO SUBSCRIPTION LOGIN: claude.exe has no claudeAiOauth credential (checked: $($claudeCredsCandidates -join '; ')). With ANTHROPIC_API_KEY stripped, claude -p '$Routine' has no subscription auth. Run ``claude`` interactively, log in with your subscription, then retry."
-    }
-    Write-Host "[preflight] claude -p '$Routine' -> subscription ($subscriptionType), API key stripped. No credit exposure."
-
-    # Pin the model only when the routine's policy sets one (mechanical routines
-    # → sonnet). Omitted otherwise so judgment-heavy routines keep the default tier.
-    $modelArg = if (-not [string]::IsNullOrEmpty($model)) { "--model $model " } else { "" }
-    # ENVIRONMENT ISOLATION (2026-07-06): --strict-mcp-config + the repo's lean
-    # .mcp.json (brightdata only) means ONLY brightdata loads. Every account-level
-    # MCP server (Carta, Airtable, Apify, Figma, Gmail, the hosted Notion MCP, ...)
-    # is excluded from the routine's context. Routines reach Notion via REST scripts
-    # (NOTION_TOKEN), not the MCP, so nothing is lost and per-run standup shrinks
-    # from ~500K+ cache tokens to low tens of K. chrome-scan-visible (the only
-    # Notion-MCP consumer) is Cowork-side, not Task-Scheduler-driven, so unaffected.
-    $mcpConfig = Join-Path $repoRoot ".mcp.json"
-    $cmdArgs = "/c `"`"$claudeExe`" -p --output-format text $modelArg--strict-mcp-config --mcp-config `"$mcpConfig`" --allowedTools `"$allowedTools`" < `"$promptPath`" >> `"$logPath`" 2>&1`""
+    # Adapter path: hand off to routines/adapters/<cli>.ps1 with a
+    # neutral param set. Claude-specific concerns (ANTHROPIC_API_KEY
+    # stripping, subscription-OAuth check, --strict-mcp-config, model
+    # pinning, --allowedTools) live inside claude.ps1. Other adapters
+    # implement whatever their CLI needs.
+    $mcpConfig    = Join-Path $repoRoot ".mcp.json"
+    $adapterQuoted = "`"$adapterPath`""
+    $modelArg     = if (-not [string]::IsNullOrEmpty($model)) { "-Model `"$model`" " } else { "" }
+    $toolsArg     = if (-not [string]::IsNullOrEmpty($allowedTools)) { "-AllowedTools `"$allowedTools`" " } else { "" }
+    # Invoke via powershell.exe so the adapter runs in its own process,
+    # then redirect its stdout+stderr to the same log the wrapper reads.
+    # -NoProfile keeps startup fast and avoids user-shell surprises.
+    $cmdArgs = "/c powershell.exe -NoProfile -ExecutionPolicy Bypass -File $adapterQuoted -Prompt `"$promptPath`" -Log `"$logPath`" -Timeout $timeoutSec $modelArg$toolsArg-McpConfig `"$mcpConfig`" -RepoRoot `"$repoRoot`""
+    Write-Host "[dispatch] routine '$Routine' -> adapter '$agentCli' (timeout ${timeoutSec}s)"
 }
 
 $exitCode      = 0
@@ -472,19 +442,28 @@ $totalAttempts = $maxRetries + 1
     $psi.UseShellExecute  = $false
     $psi.CreateNoWindow   = $true
     $proc = [System.Diagnostics.Process]::Start($psi)
-    if (-not $proc.WaitForExit($timeoutSec * 1000)) {
+    # Give the adapter's own kill loop (if any) an extra 30s to shut
+    # down cleanly and report 124 in the log before the wrapper's kill
+    # fires. For pure-script routines this is a no-op (the wrapper's
+    # timer is the only one).
+    $outerTimeoutMs = ($timeoutSec + 30) * 1000
+    if (-not $proc.WaitForExit($outerTimeoutMs)) {
         # Timeout — kill the process tree and mark timeout.
         $timedOut = $true
         try { taskkill /PID $proc.Id /T /F | Out-Null } catch {}
         try { $proc.WaitForExit(2000) | Out-Null } catch {}
         $exitCode = 124  # POSIX-ish timeout convention
-        "`nROUTINE_TIMEOUT: claude -p exceeded $timeoutSec seconds; process tree killed" |
+        "`nROUTINE_TIMEOUT: routine exceeded $timeoutSec seconds (outer wrapper timer); process tree killed" |
             Out-File -FilePath $logPath -Append -Encoding UTF8
     } else {
         # WaitForExit($ms) does NOT guarantee ExitCode is materialised; the
         # zero-arg form does. Call it to flush async state.
         try { $proc.WaitForExit() } catch {}
         $exitCode = [int]$proc.ExitCode
+        # Adapter's own timer may have fired first and returned 124.
+        # Treat that as a timeout too so the failure classifier and
+        # the log footer stay accurate.
+        if ($exitCode -eq 124) { $timedOut = $true }
     }
 } catch {
     "`nROUTINE_EXCEPTION: $_" | Out-File -FilePath $logPath -Append -Encoding UTF8
