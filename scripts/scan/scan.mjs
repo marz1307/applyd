@@ -187,12 +187,18 @@ function canonicalUrl(u) {
   if (!u) return '';
   let s;
   try { s = decodeURIComponent(u); } catch { s = u; }
+  // The job id lives in the QUERY STRING for some portals (Civil Service
+  // jobs.cgi?jcode=…, Indeed viewjob?jk=…). Capture it before dropping the
+  // query, else every distinct vacancy collapses to the same base path and is
+  // wrongly deduped. Other tracking params (?rltr=, ?lang=) still get stripped.
+  const idMatch = s.match(/[?&](jcode|jk)=([A-Za-z0-9]+)/i);
   s = s.split('#')[0];
   s = s.split('?')[0];
   s = s.toLowerCase();
   s = s.replace(/\/+$/, '');
   s = s.replace(/-inline\.html$/, '');
   s = s.replace(/\.html$/, '');
+  if (idMatch) s += `?${idMatch[1].toLowerCase()}=${idMatch[2].toLowerCase()}`;
   return s;
 }
 

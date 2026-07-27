@@ -76,15 +76,19 @@ function readInput() {
 // ── normalisation helpers ───────────────────────────────────────────
 function canonicalUrl(u) {
   if (!u || typeof u !== "string") return "";
+  // Job id lives in the query for some portals (Indeed viewjob?jk=…, Civil
+  // Service jobs.cgi?jcode=…) — keep it or distinct vacancies collapse.
+  const idMatch = u.match(/[?&](jcode|jk)=([A-Za-z0-9]+)/i);
+  const idSuffix = idMatch ? `?${idMatch[1].toLowerCase()}=${idMatch[2].toLowerCase()}` : "";
   try {
     const parsed = new URL(u);
     parsed.search = "";
     parsed.hash = "";
     let pathname = parsed.pathname.replace(/\/+$/, "");
     // Stepstone, Xing append IDs; LinkedIn jobs have /view/{id}
-    return `${parsed.protocol}//${parsed.host}${pathname}`.toLowerCase();
+    return `${parsed.protocol}//${parsed.host}${pathname}`.toLowerCase() + idSuffix;
   } catch {
-    return u.toLowerCase().split("?")[0].split("#")[0].replace(/\/+$/, "");
+    return u.toLowerCase().split("?")[0].split("#")[0].replace(/\/+$/, "") + idSuffix;
   }
 }
 
