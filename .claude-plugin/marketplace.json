@@ -1,5 +1,5 @@
 {
-  "name": "career-ops",
+  "name": "applyd",
   "metadata": {
     "description": "AI job search command center — evaluate offers, generate CVs, scan portals, track applications"
   },
@@ -9,7 +9,7 @@
   },
   "plugins": [
     {
-      "name": "career-ops",
+      "name": "applyd",
       "source": "./",
       "description": "AI job search pipeline — evaluate offers, generate CVs, scan portals, track applications",
       "category": "productivity"

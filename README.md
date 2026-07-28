@@ -1,6 +1,8 @@
-# career-ops
+# applyd
 
 Job-search pipeline that lives in your terminal. It scans portals, scores postings against your CV, drafts tailored CVs and cover letters, and logs everything to a Notion tracker. It never submits — that part is on you.
+
+Fork of Santiago Fernández de Valderrama's [career-ops](https://github.com/santifer/career-ops) (MIT), extended with multi-agent CLI dispatch, UK sponsor licensing checks, cross-portal deduplication, and a shared metrics semantic layer.
 
 Reference implementation runs as a Claude Code plugin. The same modes and routines work under Codex CLI, Cursor, Zed, OpenCode, Gemini CLI, and Aider via [`AGENTS.md`](AGENTS.md).
 
@@ -29,7 +31,7 @@ Reference implementation runs as a Claude Code plugin. The same modes and routin
 
 ## 🤖 Supported agents
 
-The project contract lives in [`AGENTS.md`](AGENTS.md) and is agent-neutral. Claude Code is the reference implementation, which is what the quickstart below covers. The same modes and routines run under Codex CLI, Cursor, Zed, OpenCode, Gemini CLI, and Aider via sibling overlay files ([`GEMINI.md`](GEMINI.md), [`.cursor/rules/career-ops.mdc`](.cursor/rules/career-ops.mdc), [`.aider.conf.yml`](.aider.conf.yml)). Headless scheduled routines dispatch through [`routines/run-routine.ps1`](routines/run-routine.ps1) to `routines/adapters/${CAREER_OPS_AGENT_CLI}.ps1`, defaulting to Claude.
+The project contract lives in [`AGENTS.md`](AGENTS.md) and is agent-neutral. Claude Code is the reference implementation, which is what the quickstart below covers. The same modes and routines run under Codex CLI, Cursor, Zed, OpenCode, Gemini CLI, and Aider via sibling overlay files ([`GEMINI.md`](GEMINI.md), [`.cursor/rules/applyd.mdc`](.cursor/rules/applyd.mdc), [`.aider.conf.yml`](.aider.conf.yml)). Headless scheduled routines dispatch through [`routines/run-routine.ps1`](routines/run-routine.ps1) to `routines/adapters/${CAREER_OPS_AGENT_CLI}.ps1`, defaulting to Claude.
 
 Per-agent setup, MCP wiring, and known caveats live in [`docs/AGENT_COMPAT.md`](docs/AGENT_COMPAT.md).
 
@@ -43,23 +45,23 @@ For the full walkthrough (every onboarding question explained, every daily-workf
 
 ```bash
 # macOS / Linux
-git clone https://github.com/marz1307/career-ops ~/.claude/skills/career-ops
-cd ~/.claude/skills/career-ops && npm install
+git clone https://github.com/marz1307/applyd ~/.claude/skills/applyd
+cd ~/.claude/skills/applyd && npm install
 
 # Windows (PowerShell)
-git clone https://github.com/marz1307/career-ops $env:USERPROFILE\.claude\skills\career-ops
-cd $env:USERPROFILE\.claude\skills\career-ops; npm install
+git clone https://github.com/marz1307/applyd $env:USERPROFILE\.claude\skills\applyd
+cd $env:USERPROFILE\.claude\skills\applyd; npm install
 ```
 
-The clone is the skill bundle. Engine code, modes, templates, and node deps all live in `~/.claude/skills/career-ops/`.
+The clone is the skill bundle. Engine code, modes, templates, and node deps all live in `~/.claude/skills/applyd/`.
 
 ### 2. Run
 
 Pick any folder as your workspace. That is where your CV, profile, applications tracker, and generated PDFs will live.
 
 ```bash
-mkdir ~/career-ops-workspace
-cd    ~/career-ops-workspace
+mkdir ~/applyd-workspace
+cd    ~/applyd-workspace
 ```
 
 Then start your agent in that folder. Claude Code is the reference path:
@@ -67,7 +69,7 @@ Then start your agent in that folder. Claude Code is the reference path:
 ```bash
 claude
 # then in chat:
-/career-ops
+/applyd
 ```
 
 Under another agent, invoke a mode file directly:
@@ -103,7 +105,7 @@ When it finishes, your workspace has `cv.md`, `config/profile.yml`, `portals.yml
 
 ```
                 ┌──────────────┐
-                │  /career-ops │   ← you invoke the skill
+                │   /applyd    │   ← you invoke the skill
                 └──────┬───────┘
                        ▼
          ┌─────────────────────────────┐
@@ -136,8 +138,8 @@ Everything past Stage 4 (assessment, phone screen, tech, onsite, offer) is track
 | Layer | File | Notes |
 |-------|------|-------|
 | Project contract | [`AGENTS.md`](AGENTS.md) | Agent-neutral source of truth: routing, ethical rules, TSV format, canonical states, mode index |
-| Claude-Code overlay | [`CLAUDE.md`](CLAUDE.md), [`SKILL.md`](SKILL.md), [`.claude-plugin/`](.claude-plugin) | Claude tool bindings and plugin marketplace manifest (drives `/career-ops`) |
-| Other-agent overlays | [`GEMINI.md`](GEMINI.md), [`.cursor/rules/career-ops.mdc`](.cursor/rules/career-ops.mdc), [`.cursorrules`](.cursorrules), [`.aider.conf.yml`](.aider.conf.yml) | One-screen pointers to `AGENTS.md` for Gemini, Cursor, Aider |
+| Claude-Code overlay | [`CLAUDE.md`](CLAUDE.md), [`SKILL.md`](SKILL.md), [`.claude-plugin/`](.claude-plugin) | Claude tool bindings and plugin marketplace manifest (drives `/applyd`) |
+| Other-agent overlays | [`GEMINI.md`](GEMINI.md), [`.cursor/rules/applyd.mdc`](.cursor/rules/applyd.mdc), [`.cursorrules`](.cursorrules), [`.aider.conf.yml`](.aider.conf.yml) | One-screen pointers to `AGENTS.md` for Gemini, Cursor, Aider |
 | Agent-compat matrix | [`docs/AGENT_COMPAT.md`](docs/AGENT_COMPAT.md) | What runs where: 7 agents, per-agent setup, known caveats |
 | Your config | [`config/profile.example.yml`](config/profile.example.yml), [`modes/_profile.template.md`](modes/_profile.template.md) | Identity, archetypes, scoring weights, comp targets, writing style |
 | Your CV | `cv.md` (created on first run) | Canonical CV in markdown |
@@ -169,18 +171,18 @@ In a Claude Code session (after onboarding), invoke via slash command:
 
 | Command | What it does |
 |---|---|
-| `/career-ops` | Help menu, or re-run onboarding |
-| `/career-ops scan` | Scan portals for new postings |
-| `/career-ops pipeline` | Process pending URLs from inbox |
+| `/applyd` | Help menu, or re-run onboarding |
+| `/applyd scan` | Scan portals for new postings |
+| `/applyd pipeline` | Process pending URLs from inbox |
 | paste a JD URL | Auto-pipeline: evaluate, draft, log |
-| `/career-ops pdf` | Generate a tailored CV PDF |
-| `/career-ops apply` | Interactive form-fill assistant |
-| `/career-ops interview-prep <company>` | Build a tailored prep doc |
-| `/career-ops contacto` | LinkedIn outreach drafts |
-| `/career-ops deep <company>` | Company research brief |
-| `/career-ops tracker` | Status snapshot of your pipeline |
-| `/career-ops patterns` | Rejection-pattern analysis |
-| `/career-ops followup` | Follow-up cadence calculator |
+| `/applyd pdf` | Generate a tailored CV PDF |
+| `/applyd apply` | Interactive form-fill assistant |
+| `/applyd interview-prep <company>` | Build a tailored prep doc |
+| `/applyd contacto` | LinkedIn outreach drafts |
+| `/applyd deep <company>` | Company research brief |
+| `/applyd tracker` | Status snapshot of your pipeline |
+| `/applyd patterns` | Rejection-pattern analysis |
+| `/applyd followup` | Follow-up cadence calculator |
 
 Under other agents, invoke the corresponding mode file directly: `codex exec "Read modes/scan.md and follow it."`, `@modes/scan.md` in Cursor, `gemini -p "Read modes/apply.md and follow it."`, and so on. See [`docs/AGENT_COMPAT.md`](docs/AGENT_COMPAT.md).
 
@@ -260,10 +262,10 @@ No. Without one, the scanner only hits free ATS endpoints (Greenhouse, Ashby, Le
 Recommended. The skill auto-creates an Applications database with three dashboard views. Without Notion, the tracker falls back to `data/applications.md` (local-only).
 
 **Can I run this without Claude Code?**
-Yes. v2.3.0 made the project agent-neutral. Claude Code is the reference implementation (that is where the `/career-ops` slash command and one-click plugin install live), and the same modes and routines run under Codex CLI, Cursor, Zed, OpenCode, Gemini CLI, and Aider via [`AGENTS.md`](AGENTS.md) and the sibling overlay files. Scheduled routines dispatch through [`routines/adapters/`](routines/adapters); set `CAREER_OPS_AGENT_CLI=codex` (or `gemini`) to swap. Full compatibility matrix and per-agent setup: [`docs/AGENT_COMPAT.md`](docs/AGENT_COMPAT.md).
+Yes. v2.3.0 made the project agent-neutral. Claude Code is the reference implementation (that is where the `/applyd` slash command and one-click plugin install live), and the same modes and routines run under Codex CLI, Cursor, Zed, OpenCode, Gemini CLI, and Aider via [`AGENTS.md`](AGENTS.md) and the sibling overlay files. Scheduled routines dispatch through [`routines/adapters/`](routines/adapters); set `CAREER_OPS_AGENT_CLI=codex` (or `gemini`) to swap. Full compatibility matrix and per-agent setup: [`docs/AGENT_COMPAT.md`](docs/AGENT_COMPAT.md).
 
 **Will updates overwrite my CV or profile?**
-No. `DATA_CONTRACT.md` enforces a hard split: engine files in `~/.claude/skills/career-ops/`, your personal files in your workspace. Updates only touch the engine.
+No. `DATA_CONTRACT.md` enforces a hard split: engine files in `~/.claude/skills/applyd/`, your personal files in your workspace. Updates only touch the engine.
 
 **Can I use this for non-tech roles?**
 Yes. The archetypes in `modes/_profile.md` are user-editable. Tell the skill "change my archetypes to product management" and it rewrites the scoring weights, framing, and CV templates to match.

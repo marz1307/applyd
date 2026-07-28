@@ -1,5 +1,5 @@
 {
-  "name": "career-ops",
+  "name": "applyd",
   "version": "1.0.0",
   "description": "AI-powered job search and application pipeline for Claude Code. Scan portals, score postings, draft tailored CVs and cover letters, log to a tracker. Never auto-submits.",
   "private": true,

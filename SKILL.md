@@ -1,12 +1,12 @@
 ---
-name: career-ops
-description: "AI-powered job search and application pipeline. Scans portals (LinkedIn, Indeed, Glassdoor, Greenhouse, Ashby, Lever, Workable, Welcome to the Jungle, Handshake, Reed UK), scores postings against the candidate's profile with A–G blocks, drafts tailored CVs and cover letters, runs interview prep with STAR+R stories, and logs everything to a Notion Applications tracker (auto-created on first run) plus a Notion dashboard view. The agent NEVER auto-submits — it stops before Submit/Send/Apply and waits for human approval. TRIGGER when the user types /career-ops, pastes a job URL, asks to scan job portals, requests a tailored CV or cover letter for a specific role, asks for interview prep for a named company, asks about application status, pipeline, or tracker, or mentions job search, job hunt, applications, recruiter, ATS, or career change. On first run the skill enters onboarding and prompts for CV upload, LinkedIn URL, portfolio URL, target job markets, target roles, scan hour, Bright Data API key, and Notion integration token; then bootstraps the user-layer files into the user's workspace, auto-creates the Notion Applications database with the canonical schema, and adds kanban plus by-stage dashboard views. SKIP for general resume formatting questions unrelated to a live job search, or for non-career-related work."
+name: applyd
+description: "AI-powered job search and application pipeline. Scans portals (LinkedIn, Indeed, Glassdoor, Greenhouse, Ashby, Lever, Workable, Welcome to the Jungle, Handshake, Reed UK), scores postings against the candidate's profile with A–G blocks, drafts tailored CVs and cover letters, runs interview prep with STAR+R stories, and logs everything to a Notion Applications tracker (auto-created on first run) plus a Notion dashboard view. The agent NEVER auto-submits — it stops before Submit/Send/Apply and waits for human approval. TRIGGER when the user types /applyd, pastes a job URL, asks to scan job portals, requests a tailored CV or cover letter for a specific role, asks for interview prep for a named company, asks about application status, pipeline, or tracker, or mentions job search, job hunt, applications, recruiter, ATS, or career change. On first run the skill enters onboarding and prompts for CV upload, LinkedIn URL, portfolio URL, target job markets, target roles, scan hour, Bright Data API key, and Notion integration token; then bootstraps the user-layer files into the user's workspace, auto-creates the Notion Applications database with the canonical schema, and adds kanban plus by-stage dashboard views. SKIP for general resume formatting questions unrelated to a live job search, or for non-career-related work."
 user-invocable: true
 argument-hint: "[scan | oferta | ofertas | pdf | apply | batch | tracker | pipeline | contacto | deep | interview-prep | training | project | patterns | followup | setup]"
 license: MIT
 ---
 
-# Career-Ops — AI Job Search Pipeline
+# applyd — AI Job Search Pipeline
 
 ## What this skill does
 
@@ -20,7 +20,7 @@ The agent **never auto-submits**. It fills forms, drafts answers, generates PDFs
 
 Default response to:
 
-- The user types `/career-ops` (with or without arguments).
+- The user types `/applyd` (with or without arguments).
 - The user pastes a job URL or JD into the chat.
 - The user asks to "scan jobs", "find roles", "tailor my CV", "draft a cover letter", "evaluate this job", "prep for an interview at X", "show my pipeline", "log this application".
 
@@ -28,10 +28,10 @@ Default response to:
 
 ## Where the skill lives vs. where user data lives
 
-The skill is **self-contained**. After install (`git clone https://github.com/marz1307/career-ops ~/.claude/skills/career-ops && cd ~/.claude/skills/career-ops && npm install`), this layout is on disk:
+The skill is **self-contained**. After install (`git clone https://github.com/marz1307/applyd ~/.claude/skills/applyd && cd ~/.claude/skills/applyd && npm install`), this layout is on disk:
 
 ```
-~/.claude/skills/career-ops/          ← ENGINE_DIR (this skill folder)
+~/.claude/skills/applyd/          ← ENGINE_DIR (this skill folder)
 ├── SKILL.md                          ← you are reading this
 ├── modes/*.md                        ← mode definitions
 ├── templates/                        ← portal config, CV template, states
@@ -45,7 +45,7 @@ The skill is **self-contained**. After install (`git clone https://github.com/ma
 
 ENGINE_DIR is **read-only from the user's perspective**. Updates land here; nothing user-specific is written here.
 
-The **WORKSPACE** is the directory the user runs `/career-ops` from. That's where personal files go:
+The **WORKSPACE** is the directory the user runs `/applyd` from. That's where personal files go:
 
 ```
 <wherever the user cd'd to>          ← WORKSPACE
@@ -66,7 +66,7 @@ The **WORKSPACE** is the directory the user runs `/career-ops` from. That's wher
 - "Read / write `cv.md` / `config/profile.yml` / `portals.yml` / `data/*` / etc." → operate on the **WORKSPACE** copy.
 - Bash invocations like `node scripts/scan/scan.mjs` → `node $ENGINE_DIR/scripts/scan/scan.mjs` with cwd = WORKSPACE so the script reads the user's portals.yml and writes to data/.
 
-To get ENGINE_DIR, the agent uses the absolute path of this SKILL.md (Read tool resolves it). On most systems it's `${HOME}/.claude/skills/career-ops` (POSIX) or `${USERPROFILE}\.claude\skills\career-ops` (Windows).
+To get ENGINE_DIR, the agent uses the absolute path of this SKILL.md (Read tool resolves it). On most systems it's `${HOME}/.claude/skills/applyd` (POSIX) or `${USERPROFILE}\.claude\skills\applyd` (Windows).
 
 ---
 
@@ -89,7 +89,7 @@ If ALL exist, jump to Step 6 (route the user's request).
 
 Before starting onboarding, confirm the workspace location:
 
-> "I'll set up your career-ops workspace in `${cwd}`. That's where your CV, profile, tracker, and generated PDFs will live. Reply 'yes' to use this folder, or give me a different absolute path."
+> "I'll set up your applyd workspace in `${cwd}`. That's where your CV, profile, tracker, and generated PDFs will live. Reply 'yes' to use this folder, or give me a different absolute path."
 
 If the user gives a different path: `mkdir -p <path>`, then use it as WORKSPACE for the rest of the session.
 
@@ -97,7 +97,7 @@ If the user gives a different path: `mkdir -p <path>`, then use it as WORKSPACE 
 
 Use **AskUserQuestion** to collect the onboarding inputs. The tool caps at 4 questions per call, so split into two consecutive batches:
 
-> "Welcome to career-ops. To set up your personal pipeline I need a few things. Nine questions split across three batches (4 + 4 + 1)."
+> "Welcome to applyd. To set up your personal pipeline I need a few things. Nine questions split across three batches (4 + 4 + 1)."
 
 **Batch 1 (questions 1–4):**
 
@@ -161,9 +161,9 @@ If "Explain first" on Bright Data:
 
 If "Walk me through" on Notion:
 
-> "1. Go to https://www.notion.com/profile/integrations and click 'New integration'. Name it 'career-ops', leave capabilities at the defaults. Click Save.
+> "1. Go to https://www.notion.com/profile/integrations and click 'New integration'. Name it 'applyd', leave capabilities at the defaults. Click Save.
 > 2. Copy the 'Internal Integration Token' (starts with `ntn_`).
-> 3. Pick a Notion page where you want the tracker to live. Open the page, click ··· → Connections → Add connections → select 'career-ops'.
+> 3. Pick a Notion page where you want the tracker to live. Open the page, click ··· → Connections → Add connections → select 'applyd'.
 > 4. Paste the token here. Tell me the URL of the parent page so I can create the tracker inside it."
 
 ## Step 3 — Onboarding: gather the actual data
@@ -219,7 +219,7 @@ Three branches based on the answer to question 9:
    ```powershell
    & "$ENGINE_DIR\scripts\install-firecrawl.ps1" -Workspace "$WORKSPACE"
    ```
-3. The script clones Firecrawl into `~/.career-ops/firecrawl`, runs `docker compose up -d`, waits for `/health` on `:3002`, and writes `FIRECRAWL_URL=http://localhost:3002` into `WORKSPACE/.env`.
+3. The script clones Firecrawl into `~/.applyd/firecrawl`, runs `docker compose up -d`, waits for `/health` on `:3002`, and writes `FIRECRAWL_URL=http://localhost:3002` into `WORKSPACE/.env`.
 4. On success, tell the user the Firecrawl admin UI is at `http://localhost:3002/admin/CHANGEME/queues` and that they can stop it any time with `bash $ENGINE_DIR/scripts/install-firecrawl.sh --stop`.
 
 **Cloud (paste API key)**:
@@ -243,7 +243,7 @@ After ANY of the three branches, the `.mcp.json` at the skill root auto-register
     timezone: "Europe/London"
     days: [1, 2, 3, 4, 5]
   ```
-- Call `/schedule` to register a recurring `/career-ops scan`. If unavailable, surface a cron / Task Scheduler snippet.
+- Call `/schedule` to register a recurring `/applyd scan`. If unavailable, surface a cron / Task Scheduler snippet.
 - "Don't schedule" → skip.
 
 ### profile.yml essentials
@@ -318,15 +318,15 @@ Print the database URL Notion returned.
 >
 > You can now:
 > - Paste a job URL to evaluate it
-> - Run `/career-ops scan` to search portals
-> - Run `/career-ops pdf` to generate a tailored CV
+> - Run `/applyd scan` to search portals
+> - Run `/applyd pdf` to generate a tailored CV
 > - Say 'change my target roles to X' to tweak anything
 >
-> Tip: from any new terminal, `cd ${WORKSPACE}` first, then type `/career-ops`."
+> Tip: from any new terminal, `cd ${WORKSPACE}` first, then type `/applyd`."
 
 ## Step 6 — Route the user's request
 
-Route based on what the user typed AFTER `/career-ops`:
+Route based on what the user typed AFTER `/applyd`:
 
 | User input | Mode |
 |---|---|
