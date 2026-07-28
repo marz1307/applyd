@@ -1,6 +1,6 @@
 # run-routine.ps1
 #
-# Wrapper invoked by Windows Task Scheduler to run a career-ops routine
+# Wrapper invoked by Windows Task Scheduler to run a applyd routine
 # under a headless agent CLI and capture its output to data/routine-logs/.
 #
 # AGENT-CLI DISPATCH (v2.3.0):
@@ -335,7 +335,7 @@ function Write-Alert($routine, $mode, $exitCode, $logPath, $attempts, $finalStat
     # Windows toast — ONLY when manual attention required
     if ($needsAttention) {
         try {
-            $title = "career-ops: $routine needs you"
+            $title = "applyd: $routine needs you"
             $msg   = "$mode after $attempts attempt(s). See data\.alerts\"
             Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
             $bal = New-Object System.Windows.Forms.NotifyIcon

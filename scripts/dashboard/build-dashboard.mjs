@@ -279,7 +279,7 @@ function buildHtml(s) {
 <head>
 <meta charset="utf-8" />
 <meta http-equiv="refresh" content="21600" />
-<title>the user Career-Ops Dashboard</title>
+<title>the user applyd Dashboard</title>
 <style>
   :root {
     --bg:#0f1115; --panel:#171a21; --border:#262b35; --fg:#e6e8ec; --muted:#8a94a6;
@@ -328,7 +328,7 @@ function buildHtml(s) {
 <body>
 <div class="wrap">
 
-<h1>the user Career-Ops Dashboard<span class="sub" id="ts"></span></h1>
+<h1>the user applyd Dashboard<span class="sub" id="ts"></span></h1>
 
 <div class="row" id="kpis"></div>
 

@@ -1,6 +1,6 @@
 # Agent Compatibility Matrix
 
-career-ops is **agent-neutral**. The project contract lives in [`AGENTS.md`](../AGENTS.md) — a plain-Markdown file that any modern coding-agent CLI can read. This document is the compatibility matrix: what works where, what needs setup, and where the sharp edges are.
+applyd is **agent-neutral**. The project contract lives in [`AGENTS.md`](../AGENTS.md) — a plain-Markdown file that any modern coding-agent CLI can read. This document is the compatibility matrix: what works where, what needs setup, and where the sharp edges are.
 
 The reference implementation is Claude Code (that's what the project was originally built and tested against). Every other agent listed here is **supported by contract** — the modes, routines, and scripts are written in generic terms and work with any agent that reads `AGENTS.md`. Community verification is welcome; open an issue if you find something drift.
 
@@ -10,9 +10,9 @@ The reference implementation is Claude Code (that's what the project was origina
 
 | Agent | Reads for instructions | Slash / mode invocation | MCP | Routine scheduler | Tested? |
 |---|---|---|---|---|---|
-| **Claude Code** | `CLAUDE.md` + `AGENTS.md` (imported) | `/career-ops <mode>` slash command; `Skill` tool for chained modes | `.mcp.json` (project-level); account-level Notion MCP for interactive sessions | `routines/run-routine.ps1` via `routines/adapters/claude.ps1` | **reference / tested** |
+| **Claude Code** | `CLAUDE.md` + `AGENTS.md` (imported) | `/applyd <mode>` slash command; `Skill` tool for chained modes | `.mcp.json` (project-level); account-level Notion MCP for interactive sessions | `routines/run-routine.ps1` via `routines/adapters/claude.ps1` | **reference / tested** |
 | **Codex CLI** | `AGENTS.md` | `codex exec` reads the prompt; paste the mode file's body or `@include` it | `~/.codex/config.toml` `[mcp_servers]` — copy the entry from `.mcp.json` | `run-routine.ps1` with `CAREER_OPS_AGENT_CLI=codex` → `routines/adapters/codex.ps1` | supported, community-verify |
-| **Cursor** | `.cursor/rules/career-ops.mdc` + `AGENTS.md` | `@modes/<name>.md` in chat or composer | `.cursor/mcp.json` (mirror the shape of `.mcp.json`) | not natively; drive `run-routine.ps1` from a separate shell | supported, community-verify |
+| **Cursor** | `.cursor/rules/applyd.mdc` + `AGENTS.md` | `@modes/<name>.md` in chat or composer | `.cursor/mcp.json` (mirror the shape of `.mcp.json`) | not natively; drive `run-routine.ps1` from a separate shell | supported, community-verify |
 | **Zed** | `AGENTS.md` (Zed's assistant reads `AGENTS.md` automatically) | `/prompt @modes/<name>.md` or paste the mode body | Zed's `settings.json` `mcp_servers` | drive `run-routine.ps1` from an external shell | supported, community-verify |
 | **OpenCode** | `AGENTS.md` | mode invocation via OpenCode's session commands | OpenCode's MCP config path | drive `run-routine.ps1` externally | supported, community-verify |
 | **Gemini CLI** | `GEMINI.md` + `AGENTS.md` | `@modes/<name>.md` in an interactive session | `~/.gemini/settings.json` `mcpServers` | `run-routine.ps1` with `CAREER_OPS_AGENT_CLI=gemini` → `routines/adapters/gemini.ps1` | supported, community-verify |
@@ -24,9 +24,9 @@ The reference implementation is Claude Code (that's what the project was origina
 
 ### Claude Code (reference)
 
-- Install via the plugin marketplace: `/plugin install marz1307/career-ops`.
-- Onboarding: type `/career-ops` in a fresh Claude Code session.
-- Modes: `/career-ops <mode>` or paste a JD URL to trigger `auto-pipeline`.
+- Install via the plugin marketplace: `/plugin install marz1307/applyd`.
+- Onboarding: type `/applyd` in a fresh Claude Code session.
+- Modes: `/applyd <mode>` or paste a JD URL to trigger `auto-pipeline`.
 - Routines: Windows Task Scheduler → `routines/run-routine.ps1 -Routine <name>` (defaults to the Claude adapter).
 - MCP: `.mcp.json` at repo root; the wrapper launches with `--strict-mcp-config` so only the declared servers load in scheduled runs.
 
@@ -54,7 +54,7 @@ The reference implementation is Claude Code (that's what the project was origina
 
 ### Cursor
 
-- Add the repo to a Cursor workspace. `.cursor/rules/career-ops.mdc` auto-applies.
+- Add the repo to a Cursor workspace. `.cursor/rules/applyd.mdc` auto-applies.
 - Invoke a mode: type `@modes/oferta.md` in the composer, then send.
 - MCP: mirror `.mcp.json` into `.cursor/mcp.json` (Cursor's own MCP config lives per-workspace).
 - Routines: run `routines/run-routine.ps1` from an external terminal.

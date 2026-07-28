@@ -119,7 +119,7 @@ async function webFetchFallback(url) {
   let res;
   try {
     res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; career-ops/1.3 +https://github.com/marz1307/career-ops)' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; applyd/1.3 +https://github.com/marz1307/applyd)' },
       redirect: 'follow',
       signal: controller.signal,
     });

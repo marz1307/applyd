@@ -44,7 +44,7 @@ If the user asks about a specific row (e.g. "where am I with Zalando AE?"):
 
 ## Reconciliation
 
-On every `/career-ops tracker` run:
+On every `/applyd tracker` run:
 
 1. Fetch all Notion rows updated since the last reconciliation timestamp.
 2. Compare to `applications.md` rows on `Company + Role` (or `Job URL` if present in cache).

@@ -2,7 +2,7 @@
 
 ## Threat model
 
-career-ops is a personal-use Claude Code skill bundle. It runs locally on the user's machine, reads the user's own configuration files, and calls third-party APIs the user explicitly configured (Notion, Bright Data, Greenhouse, Ashby, Lever, Workable). It does **not** expose a network listener, **not** accept untrusted input, and **not** run as a multi-user service. Sensitive data (Notion token, Bright Data API key) lives in a gitignored `.env` file in the user's workspace and never enters the repository.
+applyd is a personal-use Claude Code skill bundle. It runs locally on the user's machine, reads the user's own configuration files, and calls third-party APIs the user explicitly configured (Notion, Bright Data, Greenhouse, Ashby, Lever, Workable). It does **not** expose a network listener, **not** accept untrusted input, and **not** run as a multi-user service. Sensitive data (Notion token, Bright Data API key) lives in a gitignored `.env` file in the user's workspace and never enters the repository.
 
 Business criticality: **low**. There is no production deployment to attack.
 
@@ -29,9 +29,9 @@ These run automatically on every push / PR:
 
 ## Third-party licence boundaries
 
-career-ops is MIT-licensed. It integrates with third-party services whose code never enters this repository — they run in separate processes and we talk to them over HTTP / their MCP. The most important boundary to call out:
+applyd is MIT-licensed. It integrates with third-party services whose code never enters this repository — they run in separate processes and we talk to them over HTTP / their MCP. The most important boundary to call out:
 
-**Firecrawl (AGPL-3.0).** If the user opts into the self-hosted path, the install script clones the Firecrawl repository into `~/.career-ops/firecrawl` and runs it under `docker compose`. That clone is a *separate work* owned by the user; the AGPL copyleft applies to anyone who *modifies and serves* Firecrawl on the network. career-ops only makes outbound HTTP calls to a Firecrawl instance the user runs locally — we don't ship a modified Firecrawl, don't expose it as a network service, and don't redistribute its source. The AGPL does not propagate into the MIT-licensed career-ops codebase under this usage pattern.
+**Firecrawl (AGPL-3.0).** If the user opts into the self-hosted path, the install script clones the Firecrawl repository into `~/.applyd/firecrawl` and runs it under `docker compose`. That clone is a *separate work* owned by the user; the AGPL copyleft applies to anyone who *modifies and serves* Firecrawl on the network. applyd only makes outbound HTTP calls to a Firecrawl instance the user runs locally — we don't ship a modified Firecrawl, don't expose it as a network service, and don't redistribute its source. The AGPL does not propagate into the MIT-licensed applyd codebase under this usage pattern.
 
 The other integrations are clean MIT / closed-source SaaS:
 
@@ -41,7 +41,7 @@ The other integrations are clean MIT / closed-source SaaS:
 
 ## Reporting a vulnerability
 
-Open a GitHub issue at https://github.com/marz1307/career-ops/issues. Mark security-sensitive reports as a **Security advisory** under the repository's Security tab so the report stays private until a fix lands.
+Open a GitHub issue at https://github.com/marz1307/applyd/issues. Mark security-sensitive reports as a **Security advisory** under the repository's Security tab so the report stays private until a fix lands.
 
 ## Scan-noise notes
 

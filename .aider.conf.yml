@@ -1,4 +1,4 @@
-# aider config for career-ops
+# aider config for applyd
 # See AGENTS.md for the primary project contract.
 read:
   - AGENTS.md

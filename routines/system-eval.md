@@ -8,7 +8,7 @@ Your agent's headless CLI. **Not on a fixed schedule.** Fires on demand via `rou
 
 ## Goal
 
-In one pass, answer: **"Is the career-ops system healthy right now, and if not, what is the most-actionable diagnostic information for the next operator action?"**
+In one pass, answer: **"Is the applyd system healthy right now, and if not, what is the most-actionable diagnostic information for the next operator action?"**
 
 Output is dual-channel:
 - **Machine-readable** `SYSTEM_EVAL_CONTRACT` block at end (wrapper consumes)

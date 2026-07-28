@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * serve-dashboard.mjs — Tiny static HTTP server for the career-ops dashboard
+ * serve-dashboard.mjs — Tiny static HTTP server for the applyd dashboard
  *
  * Why: Chrome blocks file:// navigation via extensions and `<meta refresh>`
  * across origins, so the dashboard needs a real http:// URL. This serves
@@ -75,7 +75,7 @@ const server = createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Serving career-ops dashboard at http://localhost:${PORT}/`);
+  console.log(`Serving applyd dashboard at http://localhost:${PORT}/`);
   console.log(`  dashboard.html → http://localhost:${PORT}/dashboard.html`);
   console.log(`  JSON snapshot  → http://localhost:${PORT}/data/dashboard.json`);
   console.log(`  ROOT: ${ROOT}`);

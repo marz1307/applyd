@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * sponsor-check.mjs — UK licensed-sponsor lookup for career-ops.
+ * sponsor-check.mjs — UK licensed-sponsor lookup for applyd.
  *
  * Source of truth: the gov.uk "Register of licensed sponsors: workers"
  * (Worker and Temporary Worker), downloaded and stored under

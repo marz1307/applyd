@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * metrics-core.mjs — Shared metric definitions for career-ops (the semantic layer).
+ * metrics-core.mjs — Shared metric definitions for applyd (the semantic layer).
  *
  * One place answers "what counts as applied / responded / screened / ghosted",
  * so funnel-metrics, pace-alarm, analyze-patterns, verify-pipeline,

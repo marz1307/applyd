@@ -68,7 +68,7 @@ For each question, generate the response following:
 2. **Previous Section G**: If a draft response exists, use it as a base and refine
 3. **"I'm choosing you" tone**: Same auto-pipeline framework
 4. **Specificity**: Reference something specific from the JD visible on screen
-5. **career-ops proof point**: Include in "Additional info" if there is a field for it
+5. **applyd proof point**: Include in "Additional info" if there is a field for it
 
 **Output format:**
 
@@ -96,7 +96,7 @@ Notes:
 
 ## Step 6 — Post-apply (Notion + local cache)
 
-**READ `modes/notion-tracker.md` FIRST.** This step is the ONLY place career-ops transitions a Notion row into Stage `4. Applied`. It is triggered by the user's explicit confirmation, never automatically.
+**READ `modes/notion-tracker.md` FIRST.** This step is the ONLY place applyd transitions a Notion row into Stage `4. Applied`. It is triggered by the user's explicit confirmation, never automatically.
 
 ### Trigger
 
@@ -104,7 +104,7 @@ the user must explicitly confirm submission. Examples that count as confirmation
 - "Submitted."
 - "Done, applied."
 - "Sent it."
-- Pressing the confirm action in any UI prompt career-ops surfaces.
+- Pressing the confirm action in any UI prompt applyd surfaces.
 
 A click-on-Submit observed via Playwright is NOT sufficient on its own — confirm verbally before transitioning the Notion row, in case the submission failed silently.
 
@@ -140,7 +140,7 @@ After the Notion write succeeds:
 
 After both writes succeed:
 
-- `/career-ops contacto` for LinkedIn outreach to a named recruiter or referral.
+- `/applyd contacto` for LinkedIn outreach to a named recruiter or referral.
 - Or set up an explicit follow-up reminder using the scheduled-tasks system: "remind me in 7 days to chase {Company}".
 
 ### Error handling

@@ -1,4 +1,4 @@
-# Career-Ops — Claude Code overlay
+# applyd — Claude Code overlay
 
 > **This file layers Claude-Code-specific bindings on top of `AGENTS.md`. Read `AGENTS.md` first.** Everything project-wide — architecture, data contract, ethics, offer-verification rules, onboarding, TSV format, canonical states, Notion contract — lives there and applies to every agent equally.
 
@@ -16,7 +16,7 @@ When a mode says a generic thing like "fetch the JD", "search the repo", "read a
 | "Write / edit a file" | `Write` / `Edit` |
 | "Verify a job posting is live" (interactive) | Playwright MCP: `browser_navigate` + `browser_snapshot` |
 | "Run a background research task" | `Task` |
-| "Run another mode" (e.g. `oferta`, `pdf`) | `Skill` tool or `/career-ops <mode>` slash command |
+| "Run another mode" (e.g. `oferta`, `pdf`) | `Skill` tool or `/applyd <mode>` slash command |
 | "Web search" | `WebSearch` |
 | "Batch process without a session" | `claude -p "..."` (headless) |
 
@@ -24,7 +24,7 @@ Modes generally use generic wording (e.g. "fetch the URL and read the JD") so th
 
 ## Plugin marketplace
 
-career-ops installs as a Claude Code plugin. The marketplace entry points must stay at repo root — moving them breaks `/plugin install marz1307/career-ops`:
+applyd installs as a Claude Code plugin. The marketplace entry points must stay at repo root — moving them breaks `/plugin install marz1307/applyd`:
 
 - `.claude-plugin/marketplace.json` + `.claude-plugin/plugin.json`
 - `.mcp.json`
@@ -32,7 +32,7 @@ career-ops installs as a Claude Code plugin. The marketplace entry points must s
 - `CLAUDE.md`
 - `AGENTS.md`
 
-The `/career-ops` slash command is defined via `SKILL.md` and the plugin manifest. Onboarding, mode routing, and the recurring-scan setup are all reachable from that entry point.
+The `/applyd` slash command is defined via `SKILL.md` and the plugin manifest. Onboarding, mode routing, and the recurring-scan setup are all reachable from that entry point.
 
 ## MCP servers
 

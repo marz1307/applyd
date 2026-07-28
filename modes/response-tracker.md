@@ -78,14 +78,14 @@ If the Notion write failed, do NOT update `applications.md`. Notion is source of
 After the Notion + local cache writes:
 
 - **For Stages 5–8 (active interview process):**
-  - Suggest `/career-ops interview-prep {company} {role}` to generate a tailored prep doc for the specific upcoming round. Pulls from `interview-prep/story-bank.md` and the original report.
+  - Suggest `/applyd interview-prep {company} {role}` to generate a tailored prep doc for the specific upcoming round. Pulls from `interview-prep/story-bank.md` and the original report.
   - If `Next action date` is < 48 hours away, surface a "tight timeline" warning.
 - **For Stage 9 (Offer):**
-  - Suggest `/career-ops oferta-compare` if there are other active offers to weigh against (Stage 9 in multiple rows).
+  - Suggest `/applyd oferta-compare` if there are other active offers to weigh against (Stage 9 in multiple rows).
   - Surface the comp research from Block D of the original report alongside the verbal offer to inform negotiation.
 - **For Rejected:**
   - Capture the rejection reason in the comment for `patterns.md` analysis.
-  - Suggest `/career-ops patterns` if the user has had 5+ rejections at the same stage across companies — there's likely a fixable signal.
+  - Suggest `/applyd patterns` if the user has had 5+ rejections at the same stage across companies — there's likely a fixable signal.
 - **For Signed:**
   - One-line summary: company, role, signed comp, start date.
   - Suggest closing the loop on the Referral & Outreach DB if a referral was involved (mark the linked outreach row as `Replied` / `Success`).

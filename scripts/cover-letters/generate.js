@@ -181,8 +181,8 @@ async function generateOne({ jobUrl, companyUrl, roleHint, appId, company, count
   const formMd = composeForm({
     brief, matchBrief, cvMaster, jobUrl, today, country, city,
     applyUrl: jobUrl, applyChannel: 'web_form',
-    briefPath: briefPath.replace(/^.*career-ops[\/\\]/, ''),
-    matchPath: matchPath.replace(/^.*career-ops[\/\\]/, ''),
+    briefPath: briefPath.replace(/^.*applyd[\/\\]/, ''),
+    matchPath: matchPath.replace(/^.*applyd[\/\\]/, ''),
   });
   const formName = `${appId}-${slugify(company || brief.company || 'co')}-${today || new Date().toISOString().slice(0, 10)}-form.md`;
   const formPath = path.join(FORM_OUT_DIR, formName);

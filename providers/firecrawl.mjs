@@ -91,7 +91,7 @@ export async function scrape(url) {
 
 /**
  * Best-effort liveness ping. Returns true if Firecrawl is reachable and
- * responsive at the configured endpoint. Used by /career-ops doctor and by
+ * responsive at the configured endpoint. Used by /applyd doctor and by
  * the install script's post-install verification.
  *
  * @returns {Promise<{ok:boolean, mode:'self-host'|'cloud'|'none', detail:string}>}

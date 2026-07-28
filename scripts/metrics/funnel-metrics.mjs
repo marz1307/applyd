@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * funnel-metrics.mjs — Real outcome metrics for career-ops
+ * funnel-metrics.mjs — Real outcome metrics for applyd
  *
  * Replaces "Match score" as the headline KPI. Match score measures how well
  * a JD fits the candidate's profile — it has NO employer signal and does not predict

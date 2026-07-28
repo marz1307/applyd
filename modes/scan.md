@@ -212,7 +212,7 @@ Scan complete. Levels executed: 0+1+2+3.
   + Zalando | Analytics Engineer | https://jobs.zalando.com/...
   ...
 
-→ Run /career-ops pipeline to evaluate the new postings.
+→ Run /applyd pipeline to evaluate the new postings.
 ```
 
 ## Managing `careers_url`
@@ -309,7 +309,7 @@ Append to the `## Pending` section in `data/pipeline.md`:
 - [ ] {url} | {company} | {role}
 ```
 
-This is what `modes/pipeline.md` will pick up on the next `/career-ops pipeline` run. The Notion row at Stage 1 is the source of truth; the `pipeline.md` line is the worklist.
+This is what `modes/pipeline.md` will pick up on the next `/applyd pipeline` run. The Notion row at Stage 1 is the source of truth; the `pipeline.md` line is the worklist.
 
 ### Daily-quota and priority awareness (informational only)
 
@@ -338,5 +338,5 @@ If Bright Data is not configured, the scanner skips auth-walled portals and only
 
 | Trigger | Why |
 |---------|-----|
-| Manual `/career-ops scan` | Fast, free, headless. Hits Greenhouse / Ashby / Lever / Workable APIs. |
+| Manual `/applyd scan` | Fast, free, headless. Hits Greenhouse / Ashby / Lever / Workable APIs. |
 | Scheduled via `/loop` or `/schedule` | Run on a cadence (e.g. every 3 days). |

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * notion-dashboard.mjs — Create / verify the career-ops Notion dashboard.
+ * notion-dashboard.mjs — Create / verify the applyd Notion dashboard.
  *
  * Creates the Applications database with the canonical schema (per
  * modes/notion-tracker.md), plus a child "📊 Dashboard" page with three
@@ -17,7 +17,7 @@
  *
  * Usage:
  *   # From your workspace folder, with NOTION_TOKEN set in .env:
- *   node ~/.claude/skills/career-ops/notion-dashboard.mjs --parent-page <page-id-or-url>
+ *   node ~/.claude/skills/applyd/notion-dashboard.mjs --parent-page <page-id-or-url>
  *
  * Optional flags:
  *   --title "Custom title"        Override default "🎯 Applications"
@@ -26,7 +26,7 @@
  *   --workspace <path>            Use this folder (defaults to cwd)
  *
  * Writes the new DB id + data source id into <workspace>/config/profile.yml
- * under the notion: block, so subsequent /career-ops modes pick it up
+ * under the notion: block, so subsequent /applyd modes pick it up
  * automatically.
  */
 
@@ -55,7 +55,7 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 
 function usage() {
-  return `notion-dashboard.mjs — create or verify the career-ops Notion dashboard
+  return `notion-dashboard.mjs — create or verify the applyd Notion dashboard
 
 Usage:
   node notion-dashboard.mjs --parent-page <page-id-or-url> [options]

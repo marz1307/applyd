@@ -1,10 +1,10 @@
 # Mode: notion-tracker — Notion as System of Record
 
-This file is the **contract spec** between career-ops and the Notion job tracker. Every mode that reads or writes tracker state reads this file first to get the schema, dedup rule, score floor, stage transitions, and field mappings.
+This file is the **contract spec** between applyd and the Notion job tracker. Every mode that reads or writes tracker state reads this file first to get the schema, dedup rule, score floor, stage transitions, and field mappings.
 
 Notion is **the system of record** for live status and human approval. `data/applications.md` is a local cache that runs in parallel.
 
-The Applications database is **auto-created during onboarding** by the `/career-ops` skill (see `.claude/skills/career-ops/SKILL.md` Step 4). The skill calls `notion-create-database` with the canonical schema below, then writes the returned IDs into `config/profile.yml`.
+The Applications database is **auto-created during onboarding** by the `/applyd` skill (see `.claude/skills/applyd/SKILL.md` Step 4). The skill calls `notion-create-database` with the canonical schema below, then writes the returned IDs into `config/profile.yml`.
 
 ---
 
@@ -16,7 +16,7 @@ The Applications database is **auto-created during onboarding** by the `/career-
    ```
    NOTION_TOKEN=ntn_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
    ```
-4. Run `/career-ops setup` and pick "I have a Notion integration token" — the skill will create the database for you.
+4. Run `/applyd setup` and pick "I have a Notion integration token" — the skill will create the database for you.
 5. Or hand-create the Applications database using the schema below, then add the IDs to `config/profile.yml`:
    ```yaml
    notion:
@@ -34,13 +34,13 @@ The skill also adds three views to the Applications DB at create time:
 2. **By score** — table sorted by Match score DESC, filtered to Stages `2. Triaged` / `3. Drafted`. The user's daily drafting queue.
 3. **Active interviews** — board grouped by Stage, filtered to Stages 5–9. The interview cockpit.
 
-If you skipped the skill flow, add these views by hand in the Notion UI or re-run `/career-ops setup`.
+If you skipped the skill flow, add these views by hand in the Notion UI or re-run `/applyd setup`.
 
 ---
 
 ## Applications DB — schema
 
-The primary write target for everything career-ops produces.
+The primary write target for everything applyd produces.
 
 ### Properties
 
@@ -91,7 +91,7 @@ The primary write target for everything career-ops produces.
 
 ## Stage pipeline
 
-| # | Stage | When career-ops sets this | Notes |
+| # | Stage | When applyd sets this | Notes |
 |---|-------|----------------------------|-------|
 | 1 | `1. Discovered` | scan finds a new posting | First insert |
 | 2 | `2. Triaged` | oferta finishes A–G evaluation | Match score, Recruiter-sim verdict, Fit notes are written |
@@ -106,7 +106,7 @@ The primary write target for everything career-ops produces.
 
 **Terminal states (no further transitions):**
 
-| Stage | When career-ops sets this |
+| Stage | When applyd sets this |
 |-------|----------------------------|
 | `Rejected` | Company rejected. Captured on response. |
 | `Withdrew` | The user withdrew. Manual or apply. |
@@ -135,7 +135,7 @@ The primary write target for everything career-ops produces.
 
 ---
 
-## Field mapping — career-ops → Notion
+## Field mapping — applyd → Notion
 
 | Local TSV column | Notion field | Notes |
 |------------------|--------------|-------|

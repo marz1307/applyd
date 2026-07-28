@@ -15,7 +15,7 @@ Triggered two ways:
    runs on next launch (per the scheduled-task system's catch-up
    behaviour). This satisfies the "if system is off during schedule,
    must run when next connected" rule.
-2. **On-demand** — the user types `/career-ops chrome-scan` (or the
+2. **On-demand** — the user types `/applyd chrome-scan` (or the
    equivalent mode invocation for their agent) in chat.
 
 ## Goal

@@ -199,7 +199,7 @@ function evaluate(window7) {
     suggestion = `Apply pace below ${ALARM_THRESHOLD_PER_DAY}/day for ${consec} consecutive days. Expand fan-out: broaden role-family filter in portals.yml (add adjacent titles), enable extra EMEA countries in location_filter, or relax title_filter.negative to surface borderline roles.`;
   } else if (avg < ALARM_THRESHOLD_PER_DAY) {
     status = "warning";
-    suggestion = `Rolling 7-day average ${avg.toFixed(1)}/day vs ${TARGET_PER_DAY}/day target. Not yet alarm but trending. Review the top-of-funnel: is scan returning enough hits? Check the funnel in /career-ops tracker.`;
+    suggestion = `Rolling 7-day average ${avg.toFixed(1)}/day vs ${TARGET_PER_DAY}/day target. Not yet alarm but trending. Review the top-of-funnel: is scan returning enough hits? Check the funnel in /applyd tracker.`;
   } else if (avg < TARGET_PER_DAY) {
     status = "warning";
     suggestion = `Rolling 7-day average ${avg.toFixed(1)}/day vs ${TARGET_PER_DAY}/day target. Above the alarm floor (${ALARM_THRESHOLD_PER_DAY}) but below target. Monitor.`;

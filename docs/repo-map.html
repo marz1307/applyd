@@ -1,5 +1,5 @@
 <!--
-  career-ops repo mind map — single-file, no dependencies, works from file://.
+  applyd repo mind map — single-file, no dependencies, works from file://.
 
   UPDATE DISCIPLINE (rule in AGENTS.md → Stack and Conventions): whenever the
   repo's structure changes — a script added/removed/renamed, an import edge or
@@ -8,7 +8,7 @@
   values, report text) do not require a map update; anything a fresh session
   needs in order to navigate the codebase does.
 -->
-<title>career-ops — Architecture Map</title>
+<title>applyd — Architecture Map</title>
 <style>
 :root{
   --bg:#edf0f4;--surface:#fff;--border:#cdd3db;
@@ -77,7 +77,7 @@ canvas.dragging{cursor:grabbing}
 </style>
 
 <header>
-  <h1>career-ops</h1>
+  <h1>applyd</h1>
   <input id="search" placeholder="Search files…  (/ to focus)" spellcheck="false">
   <div id="filters"></div>
   <div class="edge-legend">
@@ -125,11 +125,11 @@ const N=[
   {id:'ag',l:'AGENTS.md',c:'entry',d:'Primary agent-neutral project contract. Every overlay file (CLAUDE.md, GEMINI.md, .cursor/rules, .aider.conf.yml) layers on top of this.',p:'AGENTS.md'},
   {id:'rd',l:'README.md',c:'entry',d:'Public-facing quickstart: install, first-run, mode routing table',p:'README.md'},
   {id:'mn',l:'MANUAL.md',c:'entry',d:'Long-form user manual: full mode catalogue, config reference, troubleshooting',p:'MANUAL.md'},
-  {id:'sk',l:'SKILL.md',c:'entry',d:'Claude Code plugin/skill manifest that exposes the /career-ops slash command',p:'SKILL.md'},
+  {id:'sk',l:'SKILL.md',c:'entry',d:'Claude Code plugin/skill manifest that exposes the /applyd slash command',p:'SKILL.md'},
   {id:'dc',l:'DATA_CONTRACT.md',c:'entry',d:'User layer vs system layer boundary — which files are safe to auto-update vs. must be preserved',p:'DATA_CONTRACT.md'},
   {id:'cl',l:'CLAUDE.md',c:'entry',d:'Claude Code overlay: tool bindings (WebFetch/Grep/Read/Skill), MCP config, headless claude -p gotchas',p:'CLAUDE.md'},
   {id:'gm',l:'GEMINI.md',c:'entry',d:'Gemini CLI overlay: @-include mode invocation + adapter pointer',p:'GEMINI.md'},
-  {id:'cr',l:'.cursor/rules/',c:'entry',d:'Cursor overlay: alwaysApply project rule pointing back to AGENTS.md',p:'.cursor/rules/career-ops.mdc'},
+  {id:'cr',l:'.cursor/rules/',c:'entry',d:'Cursor overlay: alwaysApply project rule pointing back to AGENTS.md',p:'.cursor/rules/applyd.mdc'},
   {id:'ai',l:'.aider.conf.yml',c:'entry',d:'Aider overlay: auto-reads AGENTS.md + _shared + _profile.template on start',p:'.aider.conf.yml'},
 
   // ── Modes (by phase) ─────────────────────────────────────────────

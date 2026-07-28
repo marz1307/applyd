@@ -59,7 +59,7 @@ Scan the **auth-walled and SPA-heavy portals** (LinkedIn, Xing, Stepstone, Indee
 8. **Git commit** the pipeline.md and scan-history.tsv diffs:
    ```
    git add data/pipeline.md data/scan-history.tsv
-   git -c user.name="career-ops bot" -c user.email="<git-email-from-profile>" commit -m "scan: lunchtime BD run $(date -u +%Y-%m-%dT%H:%MZ)" || echo "nothing to commit"
+   git -c user.name="applyd bot" -c user.email="<git-email-from-profile>" commit -m "scan: lunchtime BD run $(date -u +%Y-%m-%dT%H:%MZ)" || echo "nothing to commit"
    ```
    Do NOT push.
 

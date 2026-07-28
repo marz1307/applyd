@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * system-eval.mjs — single-pass observability + debugging collector for career-ops
+ * system-eval.mjs — single-pass observability + debugging collector for applyd
  *
  * Collects:
  *   1. Routine health     — last-run timestamp, exit-code, contract-pass per routine (from data/routine-logs/)
@@ -571,7 +571,7 @@ const fmtRoutine = (name, r) => {
   return `  ${emoji} ${name.padEnd(22)} status=${r.status.padEnd(13)} age=${r.age_hours ?? '?'}h  errors=${r.errors ?? '?'}`;
 };
 
-console.log(`\n=== career-ops system eval (${report.mode} mode) — ${todayISO} ===\n`);
+console.log(`\n=== applyd system eval (${report.mode} mode) — ${todayISO} ===\n`);
 console.log('## Routines');
 for (const [n, r] of Object.entries(report.routines)) console.log(fmtRoutine(n, r));
 

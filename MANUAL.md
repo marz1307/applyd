@@ -1,4 +1,4 @@
-# career-ops — User Manual
+# applyd — User Manual
 
 A step-by-step walkthrough from "I have nothing installed" to "I just clicked Submit on a tailored application." If you're skimming, the [README](README.md) gives the 90-second pitch. This file is the full operating manual.
 
@@ -44,31 +44,31 @@ The whole repo IS the skill bundle — you clone it into your Claude Code skills
 ### macOS / Linux
 
 ```bash
-git clone https://github.com/marz1307/career-ops ~/.claude/skills/career-ops
-cd ~/.claude/skills/career-ops
+git clone https://github.com/marz1307/applyd ~/.claude/skills/applyd
+cd ~/.claude/skills/applyd
 npm install
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-git clone https://github.com/marz1307/career-ops $env:USERPROFILE\.claude\skills\career-ops
-cd $env:USERPROFILE\.claude\skills\career-ops
+git clone https://github.com/marz1307/applyd $env:USERPROFILE\.claude\skills\applyd
+cd $env:USERPROFILE\.claude\skills\applyd
 npm install
 ```
 
-That's the install done. You never need to clone again — Claude Code will find the skill at `~/.claude/skills/career-ops/SKILL.md` and load it whenever you type `/career-ops`.
+That's the install done. You never need to clone again — Claude Code will find the skill at `~/.claude/skills/applyd/SKILL.md` and load it whenever you type `/applyd`.
 
 ### Set up your workspace
 
 The skill is read-only. Your personal data (CV, profile, tracker, generated PDFs) lives in a separate **workspace** folder you pick. Most people use a dedicated directory:
 
 ```bash
-mkdir ~/career-ops-workspace
-cd    ~/career-ops-workspace
+mkdir ~/applyd-workspace
+cd    ~/applyd-workspace
 ```
 
-You can use any folder. From now on, **always cd into your workspace before running `/career-ops`**. The skill writes user-layer files to whichever directory it sees as `cwd`.
+You can use any folder. From now on, **always cd into your workspace before running `/applyd`**. The skill writes user-layer files to whichever directory it sees as `cwd`.
 
 ### Optional: install Firecrawl for clean scraping
 
@@ -78,13 +78,13 @@ If you want to install it ahead of time, the bundled script handles everything:
 
 ```bash
 # macOS / Linux / Git Bash
-bash ~/.claude/skills/career-ops/scripts/install-firecrawl.sh
+bash ~/.claude/skills/applyd/scripts/install-firecrawl.sh
 
 # Windows PowerShell
-& "$env:USERPROFILE\.claude\skills\career-ops\scripts\install-firecrawl.ps1"
+& "$env:USERPROFILE\.claude\skills\applyd\scripts\install-firecrawl.ps1"
 ```
 
-It clones Firecrawl into `~/.career-ops/firecrawl`, runs `docker compose up -d`, and waits for the health check on `http://localhost:3002`. Re-running is safe; it fast-forwards the checkout and brings the container up if it's already there.
+It clones Firecrawl into `~/.applyd/firecrawl`, runs `docker compose up -d`, and waits for the health check on `http://localhost:3002`. Re-running is safe; it fast-forwards the checkout and brings the container up if it's already there.
 
 Three paths exist for Firecrawl support:
 - **Self-host** (this script) — no keys, fully local. Requires Docker.
@@ -104,7 +104,7 @@ claude
 You'll get a chat prompt. Type:
 
 ```
-/career-ops
+/applyd
 ```
 
 If everything is wired up, you'll see the onboarding flow start.
@@ -152,7 +152,7 @@ At the end of Batch 2, the skill:
    - **By score** — table sorted by Match score DESC, filtered to Stages 2–3 (your drafting queue).
    - **Active interviews** — board filtered to Stages 5–9 (your interview cockpit).
 4. Copies `portals.yml` from the template, applying your target-role keywords and target-market location filter.
-5. Registers a recurring `/career-ops scan` via the `/schedule` skill at the hour you picked.
+5. Registers a recurring `/applyd scan` via the `/schedule` skill at the hour you picked.
 6. Prints the Notion DB URL so you can open it.
 
 Setup is done. You're at Stage 0 of an empty pipeline.
@@ -175,9 +175,9 @@ If you set a scan hour, by the time you sit down the skill has already:
 Open your Notion **Pipeline board** view and look at the new Stage 1 cards. You can either:
 
 - Let the next scheduled run auto-evaluate them, OR
-- Trigger evaluation immediately by running `/career-ops pipeline` in your workspace.
+- Trigger evaluation immediately by running `/applyd pipeline` in your workspace.
 
-`/career-ops pipeline` reads every Stage 1 row, runs the A–G evaluation (see [4.2](#42-evaluate-a-specific-posting) for what that means), and updates each row's Stage and Match score in Notion.
+`/applyd pipeline` reads every Stage 1 row, runs the A–G evaluation (see [4.2](#42-evaluate-a-specific-posting) for what that means), and updates each row's Stage and Match score in Notion.
 
 ### 4.2 Evaluate a specific posting
 
@@ -227,7 +227,7 @@ Output goes to:
 If the evaluation surfaced a fit (Match score ≥ 70), tailor a CV and cover letter:
 
 ```
-/career-ops pdf
+/applyd pdf
 ```
 
 (Or paste the URL again — the auto-pipeline handles this end-to-end.)
@@ -250,7 +250,7 @@ Open both files and **read them**. The skill is good but it's not psychic — if
 When you're ready to apply, navigate to the application form in your browser. Then in Claude Code:
 
 ```
-/career-ops apply
+/applyd apply
 ```
 
 The skill:
@@ -271,7 +271,7 @@ The skill:
 2. Stamps `Apply date` to today.
 3. Sets `Next action = "Wait 1 week, then follow up if no response"`.
 4. Writes the final submitted answers into the report's Section G for audit.
-5. Suggests outreach: "want me to draft a LinkedIn note to the named recruiter or hiring manager?" — that's `/career-ops contacto`.
+5. Suggests outreach: "want me to draft a LinkedIn note to the named recruiter or hiring manager?" — that's `/applyd contacto`.
 
 That's the full cycle. From posting URL to submitted application, with the agent doing everything except the final click and the answer review.
 
@@ -282,7 +282,7 @@ That's the full cycle. From posting URL to submitted application, with the agent
 When a company replies and schedules a call:
 
 ```
-/career-ops interview-prep <company-name>
+/applyd interview-prep <company-name>
 ```
 
 The skill reads the original A–G report (specifically Block F's STAR+R stories) and builds a 6-document prep pack in `interview-prep/{NNN}-{company-slug}/`:
@@ -302,19 +302,19 @@ After each interview, tell the skill what happened ("phone screen done, went wel
 
 A few maintenance modes worth knowing:
 
-### `/career-ops tracker`
+### `/applyd tracker`
 Status snapshot — applications this week, response rate, stages by count, average time per stage, anything stale (Stage 6 for more than 10 days, Stage 9 with no response within a week, etc.).
 
-### `/career-ops patterns`
+### `/applyd patterns`
 Once you have 30+ applications, this runs pattern analysis on your data. Surfaces things like:
 - "Most rejections happen at Stage 6 (phone screen). Your CV is good but the screening conversation isn't selling. Consider mock screens."
 - "Tier-1 companies converting at 3× the rate of Tier-2. Allocate more weight there in `portals.yml`."
 - "Recruiter-sim verdict `MAYBE` rows are converting better than `INVITE` rows — the verdict is under-calibrated; review the heuristic in `modes/_profile.md`."
 
-### `/career-ops followup`
+### `/applyd followup`
 Calculates which Stage-4 applications are due for a polite check-in (default cadence: 7 weekdays after Apply date, then one more after another 5).
 
-### `/career-ops contacto`
+### `/applyd contacto`
 Drafts LinkedIn outreach messages to recruiters, hiring managers, peers, or interviewers — three-sentence hook → proof → CTA, max 300 chars for the first message.
 
 ---
@@ -339,72 +339,72 @@ The boundary between "user data the skill must never touch on update" and "syste
 
 ## 8. Troubleshooting
 
-### `/career-ops` doesn't trigger anything
-- Check `~/.claude/skills/career-ops/SKILL.md` exists.
+### `/applyd` doesn't trigger anything
+- Check `~/.claude/skills/applyd/SKILL.md` exists.
 - Try `claude --version` — older versions of Claude Code may not load skills from `~/.claude/skills/`. Update if needed.
 - Make sure you `cd`'d into your workspace, not into the skill folder. The skill runs against `cwd`.
 
 ### Notion DB didn't get created
 - Check `.env` has a valid `NOTION_TOKEN` (starts with `ntn_`).
 - Confirm you shared the parent Notion page with your integration (Notion page → ··· → Connections → Add → your integration). If you didn't, the skill can't write to it.
-- Run `/career-ops setup` to re-trigger the DB creation step alone.
+- Run `/applyd setup` to re-trigger the DB creation step alone.
 - **Or run the shell-based creator directly** — useful when the Notion MCP isn't loaded or you want to script it across machines:
 
   ```bash
   cd $WORKSPACE
-  node ~/.claude/skills/career-ops/scripts/notion/notion-dashboard.mjs --parent-page <notion-page-url-or-id>
+  node ~/.claude/skills/applyd/scripts/notion/notion-dashboard.mjs --parent-page <notion-page-url-or-id>
   ```
 
   This calls the official Notion REST API (no MCP dependency) to create the Applications DB with the canonical schema, plus a "📊 Dashboard" child page with three linked-database blocks (Pipeline / By score / Active interviews) you customise in the Notion UI. Writes the new IDs back into your workspace's `config/profile.yml`. Works from bash, Git Bash, PowerShell, and Windows CMD.
 
   Verify an existing DB matches the canonical schema:
   ```bash
-  node ~/.claude/skills/career-ops/scripts/notion/notion-dashboard.mjs --check
+  node ~/.claude/skills/applyd/scripts/notion/notion-dashboard.mjs --check
   ```
 
 ### Scanner returns zero results
 - If you skipped Bright Data, the scanner only hits free ATS endpoints. Check `portals.yml.tracked_companies` has companies with `careers_url` pointing to Greenhouse / Ashby / Lever / Workable boards.
 - Verify `portals.yml.title_filter.positive` has keywords that actually appear in the JDs you're targeting.
-- Run `npm run scan` directly from your workspace to see the raw output (`cd $WORKSPACE && node ~/.claude/skills/career-ops/scripts/scan/scan.mjs`).
+- Run `npm run scan` directly from your workspace to see the raw output (`cd $WORKSPACE && node ~/.claude/skills/applyd/scripts/scan/scan.mjs`).
 
 ### PDF generation fails
-- Playwright sometimes needs a one-time browser install: `cd ~/.claude/skills/career-ops && npx playwright install chromium`.
+- Playwright sometimes needs a one-time browser install: `cd ~/.claude/skills/applyd && npx playwright install chromium`.
 - Check `cv.md` is parseable — it needs an H1 (your name) plus H2 sections like `## Experience`, `## Skills`, etc.
 - Re-run with `npm run pdf -- --debug` to see the intermediate HTML output.
 
 ### "Setup complete" but the next session can't find anything
-- You ran `/career-ops` from a different folder. Each session, `cd` back to your workspace first.
+- You ran `/applyd` from a different folder. Each session, `cd` back to your workspace first.
 
 ### Firecrawl container died / not responding on :3002
 
 Check status:
 ```bash
-bash ~/.claude/skills/career-ops/scripts/install-firecrawl.sh --status
+bash ~/.claude/skills/applyd/scripts/install-firecrawl.sh --status
 ```
 
 If it reports the container is down, restart it:
 ```bash
-cd ~/.career-ops/firecrawl && docker compose up -d
+cd ~/.applyd/firecrawl && docker compose up -d
 ```
 
 If it still won't start, check the logs:
 ```bash
-cd ~/.career-ops/firecrawl && docker compose logs --tail 50
+cd ~/.applyd/firecrawl && docker compose logs --tail 50
 ```
 
 Common culprits:
 - Docker Desktop quit on logout / reboot. Open Docker Desktop and let it finish starting.
-- Port 3002 is taken by another process. Find what's using it (`lsof -i:3002` on macOS/Linux, `netstat -ano | findstr :3002` on Windows) and either stop that process or change Firecrawl's port (edit `~/.career-ops/firecrawl/.env` and update `FIRECRAWL_URL` in your workspace `.env` to match).
+- Port 3002 is taken by another process. Find what's using it (`lsof -i:3002` on macOS/Linux, `netstat -ano | findstr :3002` on Windows) and either stop that process or change Firecrawl's port (edit `~/.applyd/firecrawl/.env` and update `FIRECRAWL_URL` in your workspace `.env` to match).
 - Disk full — the Firecrawl images need ~1 GB.
 
 ### Docker isn't installed and I want to add Firecrawl later
 
 Two options:
-1. Install Docker Desktop from https://docker.com, then run `bash ~/.claude/skills/career-ops/scripts/install-firecrawl.sh`.
+1. Install Docker Desktop from https://docker.com, then run `bash ~/.claude/skills/applyd/scripts/install-firecrawl.sh`.
 2. Get a Firecrawl Cloud API key from https://firecrawl.dev and add `FIRECRAWL_API_KEY=fc-...` to your workspace `.env`. The fetch-chain picks up cloud automatically.
 
 ### Help! I want to start over
-- Delete your workspace folder and run `/career-ops` in a fresh empty directory. Notion DB stays; the skill will recognise the existing one if `notion.applications_db_id` is preserved in `config/profile.yml`.
+- Delete your workspace folder and run `/applyd` in a fresh empty directory. Notion DB stays; the skill will recognise the existing one if `notion.applications_db_id` is preserved in `config/profile.yml`.
 
 ---
 
@@ -414,28 +414,28 @@ In any Claude Code session, after `cd`ing into your workspace:
 
 | Command | Effect |
 |---|---|
-| `/career-ops` | Help menu / re-run onboarding |
-| `/career-ops setup` | Force-re-run onboarding |
-| `/career-ops scan` | Scan portals for new postings |
-| `/career-ops pipeline` | Process all pending Stage-1 URLs (evaluate them) |
+| `/applyd` | Help menu / re-run onboarding |
+| `/applyd setup` | Force-re-run onboarding |
+| `/applyd scan` | Scan portals for new postings |
+| `/applyd pipeline` | Process all pending Stage-1 URLs (evaluate them) |
 | paste a JD URL | Auto-pipeline: evaluate + draft + log |
-| `/career-ops oferta <url>` | Evaluate one specific JD only |
-| `/career-ops ofertas` | Compare multiple offers side-by-side |
-| `/career-ops pdf` | Generate a tailored CV PDF for the current draft |
-| `/career-ops apply` | Interactive form-fill assistant |
-| `/career-ops interview-prep <company>` | Build a tailored prep doc |
-| `/career-ops contacto` | LinkedIn outreach drafts |
-| `/career-ops deep <company>` | Company research brief |
-| `/career-ops tracker` | Status snapshot of your pipeline |
-| `/career-ops patterns` | Rejection-pattern analysis (needs 30+ apps) |
-| `/career-ops followup` | Follow-up cadence calculator |
-| `/career-ops project <name>` | Evaluate adding a portfolio project |
-| `/career-ops training <course>` | Evaluate a course or certification |
+| `/applyd oferta <url>` | Evaluate one specific JD only |
+| `/applyd ofertas` | Compare multiple offers side-by-side |
+| `/applyd pdf` | Generate a tailored CV PDF for the current draft |
+| `/applyd apply` | Interactive form-fill assistant |
+| `/applyd interview-prep <company>` | Build a tailored prep doc |
+| `/applyd contacto` | LinkedIn outreach drafts |
+| `/applyd deep <company>` | Company research brief |
+| `/applyd tracker` | Status snapshot of your pipeline |
+| `/applyd patterns` | Rejection-pattern analysis (needs 30+ apps) |
+| `/applyd followup` | Follow-up cadence calculator |
+| `/applyd project <name>` | Evaluate adding a portfolio project |
+| `/applyd training <course>` | Evaluate a course or certification |
 
 ### npm scripts (run from your workspace, point to engine)
 
 ```bash
-# pattern: cd $WORKSPACE && node ~/.claude/skills/career-ops/<script>.mjs
+# pattern: cd $WORKSPACE && node ~/.claude/skills/applyd/<script>.mjs
 
 npm run scan          # zero-token portal scanner
 npm run pdf           # HTML to ATS-optimised PDF

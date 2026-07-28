@@ -7,7 +7,7 @@
 // providers (Greenhouse, Lever) still return in <1s, so the higher cap
 // only matters when a slow provider is being polled.
 const DEFAULT_TIMEOUT_MS = 20_000;
-const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; career-ops/1.3)';
+const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; applyd/1.3)';
 
 async function fetchWithTimeout(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}) {
   const controller = new AbortController();

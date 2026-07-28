@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # scripts/install-firecrawl.sh
 #
-# Idempotent self-hosted Firecrawl installer for career-ops Step −1
+# Idempotent self-hosted Firecrawl installer for applyd Step −1
 # (URL ↔ JD coherence). Run once during onboarding when the user picks
 # "Self-host (Docker required, no keys)" — re-running is safe.
 #
 # Behaviour:
 #   1. Check Docker + docker compose are present. If missing, exit code 2
 #      so the calling skill can fall back to the Cloud / Skip prompts.
-#   2. Clone (or fast-forward) the Firecrawl repo to ~/.career-ops/firecrawl.
+#   2. Clone (or fast-forward) the Firecrawl repo to ~/.applyd/firecrawl.
 #   3. docker compose build && docker compose up -d.
 #   4. Wait up to 60s for the /health endpoint on http://localhost:3002.
 #   5. Write FIRECRAWL_URL into the workspace .env (if --workspace is given).
@@ -27,7 +27,7 @@
 
 set -euo pipefail
 
-FIRECRAWL_DIR="${FIRECRAWL_DIR:-$HOME/.career-ops/firecrawl}"
+FIRECRAWL_DIR="${FIRECRAWL_DIR:-$HOME/.applyd/firecrawl}"
 FIRECRAWL_REPO="https://github.com/firecrawl/firecrawl.git"
 FIRECRAWL_PORT=3002
 HEALTH_TIMEOUT=60
@@ -141,7 +141,7 @@ if [[ ! -f .env ]]; then
   cat > .env <<EOF
 PORT=${FIRECRAWL_PORT}
 HOST=0.0.0.0
-BULL_AUTH_KEY=$(date +%s)-$(head -c 8 /dev/urandom 2>/dev/null | base64 | tr -d '/+=' || echo "career-ops")
+BULL_AUTH_KEY=$(date +%s)-$(head -c 8 /dev/urandom 2>/dev/null | base64 | tr -d '/+=' || echo "applyd")
 EOF
   echo "✓ Wrote $FIRECRAWL_DIR/.env"
 fi

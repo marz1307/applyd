@@ -1,12 +1,12 @@
-# Career-Ops — AI Job Search Pipeline
+# applyd — AI Job Search Pipeline
 
-> **This is the primary project contract.** It is agent-neutral and applies to any coding agent that reads `AGENTS.md` (Claude Code, Codex CLI, Cursor, Zed, OpenCode, Gemini CLI, Aider, …). Agent-specific overlays live in sibling files: `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/career-ops.mdc`, `.aider.conf.yml`. See `docs/AGENT_COMPAT.md` for the full matrix.
+> **This is the primary project contract.** It is agent-neutral and applies to any coding agent that reads `AGENTS.md` (Claude Code, Codex CLI, Cursor, Zed, OpenCode, Gemini CLI, Aider, …). Agent-specific overlays live in sibling files: `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/applyd.mdc`, `.aider.conf.yml`. See `docs/AGENT_COMPAT.md` for the full matrix.
 
 ## Origin
 
-Originally built and used by [santifer](https://santifer.io) for AI/automation roles, [career-ops](https://github.com/santifer/career-ops) is an end-to-end job search and application tool. This release keeps the architecture generic so any candidate can install it under the agent of their choice and reshape it for their own market and target roles.
+applyd is a fork of [career-ops](https://github.com/santifer/career-ops), originally built and used by [santifer](https://santifer.io) for AI/automation roles. This release keeps the architecture generic so any candidate can install it under the agent of their choice and reshape it for their own market and target roles.
 
-## What is career-ops
+## What is applyd
 
 AI-powered job search automation. End-to-end pipeline: scan job portals → evaluate offers with A–G blocks → draft tailored CV + cover letter → human approves → submit → log everything to the tracker.
 

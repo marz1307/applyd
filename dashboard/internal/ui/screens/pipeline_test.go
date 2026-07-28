@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/santifer/career-ops/dashboard/internal/model"
-	"github.com/santifer/career-ops/dashboard/internal/theme"
+	"github.com/marz1307/applyd/dashboard/internal/model"
+	"github.com/marz1307/applyd/dashboard/internal/theme"
 )
 
 func tabIndexForFilter(t *testing.T, filter string) int {

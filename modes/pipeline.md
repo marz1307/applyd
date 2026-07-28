@@ -1,6 +1,6 @@
 # Mode: pipeline — URL Inbox (Second Brain)
 
-Process job URLs stored in `data/pipeline.md`. The user adds URLs at any time and then executes `/career-ops pipeline` to process them all.
+Process job URLs stored in `data/pipeline.md`. The user adds URLs at any time and then executes `/applyd pipeline` to process them all.
 
 ## Workflow
 

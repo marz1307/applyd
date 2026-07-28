@@ -23,7 +23,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$FirecrawlDir  = if ($env:FIRECRAWL_DIR) { $env:FIRECRAWL_DIR } else { Join-Path $env:USERPROFILE ".career-ops\firecrawl" }
+$FirecrawlDir  = if ($env:FIRECRAWL_DIR) { $env:FIRECRAWL_DIR } else { Join-Path $env:USERPROFILE ".applyd\firecrawl" }
 $FirecrawlRepo = "https://github.com/firecrawl/firecrawl.git"
 $Port          = 3002
 $HealthTimeout = 60

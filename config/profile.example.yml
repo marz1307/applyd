@@ -1,4 +1,4 @@
-# Career-Ops Profile Configuration
+# applyd Profile Configuration
 # Copy this file to config/profile.yml and fill in your details.
 # This is the single source of truth for your personal data across all modes.
 
@@ -97,12 +97,12 @@ work_eligibility:
 
 cv:
   output_format: "html" # "html" (default) or "latex"
-  # (Optional) Canva resume design ID for visual CV generation via /career-ops pdf.
+  # (Optional) Canva resume design ID for visual CV generation via /applyd pdf.
   # Find it in your Canva design URL: https://www.canva.com/design/DAxxxxxxx/...
   # The ID starts with "D" and is 11 characters long.
   # canva_resume_design_id: "DAxxxxxxxxx"
 # Notion as system of record for the Applications database.
-# The /career-ops skill auto-populates this during onboarding.
+# The /applyd skill auto-populates this during onboarding.
 # notion:
 #   applications_db_id: "00000000000000000000000000000000"
 #   applications_data_source_id: "00000000-0000-0000-0000-000000000000"

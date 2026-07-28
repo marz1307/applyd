@@ -1,4 +1,4 @@
-# Career-Ops — Gemini CLI overlay
+# applyd — Gemini CLI overlay
 
 > **This file layers Gemini-CLI-specific bindings on top of `AGENTS.md`. Read `AGENTS.md` first.** Everything project-wide — architecture, data contract, ethics, offer-verification rules, onboarding, TSV format, canonical states, Notion contract — lives there and applies to every agent equally.
 

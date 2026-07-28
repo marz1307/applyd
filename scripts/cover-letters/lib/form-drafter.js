@@ -337,7 +337,7 @@ function buildBody({ brief, matchBrief, factsPicked, jdQuestions, country, city,
 const BANNED_BODY = [
   /Application ID\s*:/gi, /Match score\s*:/gi, /Apply URL pattern\s*:/gi,
   /Generated\s*:\s*\d{4}-\d{2}-\d{2}/gi, /Drafted by/gi, /auto-draft pipeline/gi,
-  /career-ops/gi, /Reviewed by \w+/gi, /Source JD\s*:/gi, /Application channel\s*:/gi,
+  /applyd/gi, /Reviewed by \w+/gi, /Source JD\s*:/gi, /Application channel\s*:/gi,
   /—/g,  // em dash
   /\bpassionate about\b/gi, /\bresults[- ]driven\b/gi, /\bthrive in fast[- ]paced\b/gi,
   /\bI am writing to express my interest\b/gi, /\bnot\s+\w+,?\s+but\s+\w+/g,
