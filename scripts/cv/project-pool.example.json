@@ -1,0 +1,68 @@
+{
+  "_comment": "JD-driven project selection pool. Consumed by scripts/cv/project-scoring.cjs, which is imported by both scripts/cv/build-cvs.js and scripts/cv/generate-pdf-tailored.mjs so both renderers agree on rankings. Copy this file to project-pool.json and populate; the populated file is gitignored. max_projects protects the 2-page rule — selection REPLACES, never adds. Per-project fields: archetypes (0-3 role-family fit), impact (1-5 shape/strength tie-breaker), keywords_strong (3pts each, domain/architecture concepts), keywords_weak (1pt each, tech tags). Optional: variants_{lang} for archetype-specific body text. Synonyms (top-level) expand a keyword to its family so 'kimball' hits when a JD says 'star schema'. Archetype keys: AE (analytics engineer), DS (data scientist), DE (data engineer), DA (data analyst), ME (ML engineer).",
+  "max_projects": 4,
+  "synonyms": {
+    "kimball": ["kimball", "dimensional modelling", "dimensional modeling", "star schema", "snowflake schema", "fact table", "conformed dimension", "conformed dimensions", "scd type 2", "type 2 scd"],
+    "warehouse": ["warehouse", "data warehouse", "lakehouse", "warehouse layer"],
+    "orchestration": ["orchestration", "workflow", "dag", "scheduler", "airflow", "dagster", "prefect", "argo"],
+    "dbt": ["dbt", "analytics engineering", "transformation layer"],
+    "elt": ["elt", "etl", "extract-load-transform", "extract-transform-load", "ingestion"],
+    "sql server": ["sql server", "t-sql", "tsql", "mssql", "microsoft sql", "azure sql"],
+    "postgres": ["postgres", "postgresql", "psql", "pgsql"],
+    "power bi": ["power bi", "powerbi", "dax", "power query", "power pivot"],
+    "tableau": ["tableau", "hyper", "tabpy"],
+    "ml serving": ["model serving", "inference api", "mlflow", "sagemaker", "vertex ai", "seldon", "bentoml", "triton", "fastapi"],
+    "classification": ["classification", "classifier", "gradient boosting", "xgboost", "lightgbm", "random forest", "logistic regression"],
+    "time series": ["time series", "time-series", "arima", "sarima", "ets", "forecast", "forecasting"],
+    "schema": ["schema", "data model", "database design", "relational model", "third normal form", "3nf", "referential integrity"],
+    "ci_cd": ["ci", "cd", "ci/cd", "continuous integration", "github actions", "gitlab ci", "circleci", "pytest", "tests", "test coverage"]
+  },
+  "projects": [
+    {
+      "id": "sample_dashboard",
+      "pinned": true,
+      "impact": 4,
+      "keywords_strong": ["power bi", "dax", "dashboard", "bi", "kpi", "reporting"],
+      "keywords_weak": ["visualisation", "visualization", "retail"],
+      "archetypes": {"AE": 2, "DS": 0, "DE": 1, "DA": 3, "ME": 0},
+      "md_en": "**Sample Analytics Dashboard** · Portfolio Project · 2024 · BI / Retail\nSingle-screen BI report on a public retail dataset.\n\n- Data model in dbt with staging, intermediate, and mart layers on a Postgres source.\n- Metrics defined in DAX and rendered as a Power BI report against the modelled marts.\n- Single-screen constraint forces every visual to earn its place, ATS-clean layout.\n\n`Power BI` `DAX` `dbt` `PostgreSQL`",
+      "md_de": "**Sample Analytics Dashboard** · Portfolio-Projekt · 2024 · BI / Retail\nEinseitiger BI-Report auf einem öffentlichen Retail-Datensatz.\n\n- Datenmodell in dbt mit Staging-, Intermediate- und Mart-Schichten auf einer Postgres-Quelle.\n- Kennzahlen in DAX definiert und als Power-BI-Report gegen die Marts ausgerollt.\n- Ein-Screen-Vorgabe zwingt jeden Visual, seinen Platz zu verdienen.\n\n`Power BI` `DAX` `dbt` `PostgreSQL`"
+    },
+    {
+      "id": "example_pipeline",
+      "impact": 4,
+      "keywords_strong": ["orchestration", "elt", "dbt", "warehouse", "airflow"],
+      "keywords_weak": ["python", "docker", "pipeline", "ingestion"],
+      "archetypes": {"AE": 3, "DS": 1, "DE": 3, "DA": 1, "ME": 1},
+      "md_en": "**Example Data Pipeline** · Portfolio Project · 2024 · Data Engineering\nEnd-to-end ingestion pipeline built as a portfolio artefact.\n\n- Python extractors against a public API, orchestrated by Airflow with idempotent runs and backfills.\n- dbt transformation layer materialised into a Postgres warehouse in Kimball-style dimensional design.\n- Whole stack containerised with Docker, tested with pytest, deployable to a single VM.\n\n`Python` `Airflow` `dbt` `PostgreSQL` `Docker` `pytest`",
+      "md_de": "**Example Data Pipeline** · Portfolio-Projekt · 2024 · Data Engineering\nEnd-to-End-Ingestion-Pipeline als Portfolio-Artefakt.\n\n- Python-Extraktoren gegen eine öffentliche API, per Airflow mit idempotenten Läufen und Backfills orchestriert.\n- dbt-Transformationsschicht in ein Postgres-Warehouse in Kimball-Design materialisiert.\n- Der gesamte Stack in Docker, mit pytest getestet, auf einer einzigen VM deploybar.\n\n`Python` `Airflow` `dbt` `PostgreSQL` `Docker` `pytest`"
+    },
+    {
+      "id": "placeholder_ml_model",
+      "impact": 3,
+      "keywords_strong": ["classification", "ml serving", "machine learning", "shap"],
+      "keywords_weak": ["python", "scikit", "sklearn", "xgboost"],
+      "archetypes": {"AE": 1, "DS": 3, "DE": 1, "DA": 1, "ME": 3},
+      "md_en": "**Placeholder ML Model** · Portfolio Project · 2023 · Applied ML\nGradient-boosted classifier on a public dataset with SHAP-driven feature attribution.\n\n- Reproducible training notebook plus a small inference CLI wrapping the trained model.\n- Held-out test set with cross-validated hyperparameter search; interpretable logistic baseline for comparison.\n- Test coverage via pytest across data loaders and inference wrapper.\n\n`Python` `scikit-learn` `XGBoost` `SHAP` `pytest`",
+      "md_de": "**Placeholder ML Model** · Portfolio-Projekt · 2023 · Angewandtes ML\nGradient-Boosted-Klassifikator auf einem öffentlichen Datensatz mit SHAP-Feature-Attribution.\n\n- Reproduzierbares Training-Notebook plus kleines Inference-CLI um das trainierte Modell.\n- Held-out-Testset mit kreuzvalidierter Hyperparameter-Suche; interpretierbare logistische Baseline als Vergleich.\n- Testabdeckung via pytest über Data-Loader und Inference-Wrapper.\n\n`Python` `scikit-learn` `XGBoost` `SHAP` `pytest`"
+    },
+    {
+      "id": "sample_forecasting",
+      "impact": 2,
+      "keywords_strong": ["time series", "forecasting", "arima", "r language"],
+      "keywords_weak": ["statistics", "statistical"],
+      "archetypes": {"AE": 1, "DS": 2, "DE": 0, "DA": 1, "ME": 0},
+      "md_en": "**Sample Time-Series Forecasting** · Portfolio Project · 2023 · Statistics\nR-based univariate forecasting on 1,000 daily observations of a public series.\n\n- ARIMA, seasonal ARIMA, and ETS via a MODEL_REGISTRY pattern with a single decision rule.\n- Residual diagnostics (Ljung-Box, Shapiro-Wilk) and stationarity tests (ADF, KPSS) combined into the model choice.\n\n`R` `ARIMA` `ETS` `Time Series` `Statistical Testing`",
+      "md_de": "**Sample Time-Series Forecasting** · Portfolio-Projekt · 2023 · Statistik\nR-basiertes univariates Forecasting auf 1.000 Tagesbeobachtungen einer öffentlichen Reihe.\n\n- ARIMA, saisonales ARIMA und ETS über ein MODEL_REGISTRY-Muster mit einer Entscheidungsregel.\n- Residualdiagnosen (Ljung-Box, Shapiro-Wilk) und Stationaritätstests (ADF, KPSS) in die Modellwahl kombiniert.\n\n`R` `ARIMA` `ETS` `Zeitreihen` `Statistische Tests`"
+    },
+    {
+      "id": "example_schema_design",
+      "impact": 3,
+      "keywords_strong": ["sql server", "schema", "database design", "relational"],
+      "keywords_weak": ["tsql", "mssql"],
+      "archetypes": {"AE": 2, "DS": 0, "DE": 2, "DA": 1, "ME": 0},
+      "md_en": "**Example Airport Schema Design** · Portfolio Project · 2022 · Database Design\nSQL Server schema for a simplified airport ticketing platform.\n\n- Seven core entities with integrity enforced by construction: CHECK constraints on date ordering, UNIQUE constraints on identifiers, foreign keys against orphan rows.\n- Sequences and triggers for identifier generation, kept minimal and documented.\n\n`SQL Server` `T-SQL` `Schema Design` `Referential Integrity`",
+      "md_de": "**Example Airport Schema Design** · Portfolio-Projekt · 2022 · Datenbankdesign\nSQL-Server-Schema für eine vereinfachte Flugticketing-Plattform.\n\n- Sieben Kernentitäten, Integrität durch Konstruktion: CHECK-Constraints, UNIQUE-Constraints und Foreign Keys gegen Orphan-Zeilen.\n- Sequenzen und Trigger für ID-Generierung, minimal und dokumentiert.\n\n`SQL Server` `T-SQL` `Schemadesign` `Referenzielle Integrität`"
+    }
+  ]
+}

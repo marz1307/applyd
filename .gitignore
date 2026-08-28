@@ -87,7 +87,14 @@ HANDOFF.md
 package-lock.json
 # CV generator outputs
 cv/output/
+scripts/cv/output/
 output/cv-drafts/
+
+# CV pipeline user data — populate from the .example.json siblings, which
+# ship. The populated versions carry personal history and stay local-only.
+scripts/cv/cv_master.json
+scripts/cv/experience-pool.json
+scripts/cv/project-pool.json
 
 # Wrapper alert payloads (transient)
 data/.alerts/

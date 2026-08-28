@@ -1,0 +1,16 @@
+{
+  "_comment": "Per-archetype experience block overrides for dual-role positions. Keyed by company slug (matched case-insensitively against the ### role header line from cv.md). When the tailored generator finds a matching role, it replaces the whole role block with variants_{lang}[{archetype.lower()}] if present; otherwise the cv.md block is used unchanged. Each override is a full markdown role block (### header + optional intro + bullets + Stack line). Copy this file to experience-pool.json and populate. The populated file is gitignored. Only companies with genuine dual-role work need entries here — single-archetype roles need no overrides at all.",
+  "experiences": [
+    {
+      "slug": "example_analytics",
+      "cv_header_match": "Example Analytics Ltd",
+      "variants_en": {
+        "ae": "### Analytics Engineer · Example Analytics Ltd · London, UK · Permanent, March 2023 – Present\n\nB2B SaaS analytics vendor. I owned the customer-facing data layer end to end.\n\n- Consolidated 3 upstream systems into one warehouse on a deduplicated account spine, with 20+ dbt models and CI-gated tests on every merge.\n- Re-architected the highest-volume revenue models as incremental with deterministic hash IDs, cutting daily compute roughly 10%.\n- Introduced 100+ dbt and pytest tests across staging and marts, catching 10 upstream data-quality regressions before release.\n- Shipped a lightweight FastAPI service exposing account-level metrics, replacing ad-hoc CSV exports for the dashboard team.\n\n**Stack:** dbt · PostgreSQL · Python · FastAPI · GitHub Actions · Docker",
+        "de": "### Analytics Engineer · Example Analytics Ltd · London, UK · Permanent, March 2023 – Present\n\nB2B SaaS analytics vendor. I owned the data platform underneath the customer-facing product.\n\n- Consolidated 3 upstream systems into one warehouse on a deduplicated account spine, with 20+ dbt models and CI-gated tests on every merge.\n- Built the ingestion side as idempotent Python extractors on Airflow, with backfills and asset-level lineage.\n- Introduced 100+ dbt and pytest tests across staging and marts, catching 10 upstream data-quality regressions before release.\n- Shipped a lightweight FastAPI service exposing account-level metrics to internal services and dashboards.\n\n**Stack:** Python · Airflow · PostgreSQL · dbt · FastAPI · Docker · GitHub Actions"
+      },
+      "variants_de": {
+        "ae": "### Analytics Engineer · Example Analytics Ltd · London, Vereinigtes Königreich · Festanstellung, 03/2023 – heute\n\nB2B-SaaS-Analytik-Anbieter. Die kundenseitige Datenschicht end-to-end verantwortet.\n\n- Drei Upstream-Systeme in ein Warehouse auf deduplizierter Account-Spine konsolidiert, 20+ dbt-Modelle mit CI-gesicherten Tests pro Merge.\n- Die volumenstärksten Revenue-Modelle als inkrementell mit deterministischen Hash-IDs neu aufgebaut; tägliche Rechenzeit um ca. 10 % reduziert.\n- 100+ dbt- und pytest-Tests über Staging und Marts eingeführt, 10 vorgelagerte Datenqualitätsregressionen vor Release abgefangen.\n\n**Stack:** dbt · PostgreSQL · Python · FastAPI · GitHub Actions · Docker"
+      }
+    }
+  ]
+}

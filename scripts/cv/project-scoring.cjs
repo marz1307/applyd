@@ -166,9 +166,19 @@ function scoreAllProjects({ pool, archetype, jdText }) {
 }
 
 // Convenience loader — reads pool from disk relative to this file.
+// Falls back to project-pool.example.json when the populated file is absent,
+// so a fresh clone (no user data yet) still renders a working CV — and the
+// smoke test (which never checks in user data) has something to score against.
 function loadPool(poolPath) {
-  const p = poolPath || path.resolve(__dirname, 'project-pool.json');
-  if (!fs.existsSync(p)) return null;
+  if (poolPath) {
+    if (!fs.existsSync(poolPath)) return null;
+    try { return JSON.parse(fs.readFileSync(poolPath, 'utf8')); }
+    catch { return null; }
+  }
+  const populated = path.resolve(__dirname, 'project-pool.json');
+  const example = path.resolve(__dirname, 'project-pool.example.json');
+  const p = fs.existsSync(populated) ? populated : (fs.existsSync(example) ? example : null);
+  if (!p) return null;
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); }
   catch { return null; }
 }

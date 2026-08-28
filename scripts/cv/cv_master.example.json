@@ -1,0 +1,137 @@
+{
+  "_comment": "Example CV master data for the applyd CV pipeline. Copy this file to cv_master.json and populate with your own details. The populated cv_master.json is gitignored so your personal data never enters version control. Shape is the source of truth for scripts/cv/build-cvs.js — every top-level key here is consumed by the renderer, so keep the shape when you populate.",
+  "version": "v1-example",
+  "name": "Alex Sample",
+  "contact": {
+    "location_en": "London, UK",
+    "location_de": "London, Vereinigtes Königreich",
+    "phone": "+44 20 7946 0000",
+    "email": "alex@example.com",
+    "linkedin": "linkedin.com/in/alex-sample",
+    "github": "github.com/alex-sample",
+    "portfolio": "alex-sample.example.com"
+  },
+  "positioning_line": "I make data trustworthy, then I make it useful.",
+  "employers": [
+    {
+      "id": "example_analytics",
+      "role": "Analytics Engineer · Example Analytics Ltd · London, UK",
+      "dates": "Permanent · March 2023 – Present",
+      "summary": "B2B SaaS analytics vendor. Owned the customer-facing data layer end to end, from ingestion into a cloud warehouse through modelled marts to a BI service layer used by 10 internal stakeholders.",
+      "bullets": [
+        "Consolidated 3 upstream systems into a single warehouse on a deduplicated account spine, with 20+ dbt models and CI-gated tests on every merge.",
+        "Re-architected the highest-volume revenue models as incremental with deterministic hash IDs, cutting daily compute roughly 10%.",
+        "Introduced 100+ dbt and pytest tests across staging and marts, catching 10 upstream data-quality regressions before release.",
+        "Shipped a lightweight FastAPI service exposing account-level metrics to the customer dashboard team, replacing ad-hoc CSV exports.",
+        "Ran a weekly office-hour for analysts moving from spreadsheet reporting to SQL, tripling self-serve query volume in a quarter."
+      ],
+      "stack": "dbt, PostgreSQL, Python, FastAPI, GitHub Actions, Docker."
+    },
+    {
+      "id": "sample_data_co",
+      "role": "Data Analyst · Sample Data Co · Remote",
+      "dates": "January 2021 – February 2023",
+      "summary": "Consumer subscription analytics. Reporting and dashboarding across acquisition, retention, and churn for a 100k-customer product.",
+      "bullets": [
+        "Rebuilt the weekly reporting pack in a BI tool, cutting handover time from about a day to under an hour.",
+        "Wrote and documented 50+ analytical SQL queries reused by the marketing and product teams.",
+        "Ran a cohort-based retention study that surfaced a 10% drop-off at the 30-day mark, leading to a lifecycle-email fix.",
+        "Owned data-quality reviews on the ingestion side, closing three long-standing joins that had silently split accounts."
+      ],
+      "stack": "SQL, Python, Power BI, Airflow, Snowflake."
+    },
+    {
+      "id": "placeholder_retail",
+      "role": "Junior Data Analyst · Placeholder Retail GmbH · Berlin, DE",
+      "dates": "September 2019 – December 2020",
+      "summary": "Retail chain analytics. Store-level reporting and pricing analytics for a mid-size grocery chain across 50 sites.",
+      "bullets": [
+        "Automated the weekly store performance report in Python, freeing about 10 hours of manual spreadsheet work per week.",
+        "Built a pricing-elasticity dashboard covering 1,000 SKUs, which fed the quarterly range review.",
+        "Contributed to a data-integrity overhaul that improved core dataset accuracy 10% over six months."
+      ],
+      "stack": "SQL, Python, Excel, Power BI."
+    }
+  ],
+  "projects": [
+    {
+      "id": "sample_dashboard",
+      "title": "Sample Analytics Dashboard",
+      "meta": "Portfolio Project · 2024 · BI / Retail",
+      "summary": "Single-screen BI report on a public retail dataset. Data model in dbt, metrics in DAX, published as a Power BI report against a Postgres source.",
+      "tags": ["Power BI", "DAX", "dbt", "PostgreSQL"]
+    },
+    {
+      "id": "example_pipeline",
+      "title": "Example Data Pipeline",
+      "meta": "Portfolio Project · 2024 · Data Engineering",
+      "summary": "End-to-end ingestion pipeline: Python extractors, Airflow orchestration, dbt transformation, PostgreSQL warehouse, all containerised. Runs on a schedule against a public API.",
+      "tags": ["Python", "Airflow", "dbt", "PostgreSQL", "Docker"]
+    },
+    {
+      "id": "placeholder_ml_model",
+      "title": "Placeholder ML Model",
+      "meta": "Portfolio Project · 2023 · Applied ML",
+      "summary": "Gradient-boosted classifier on a public dataset with SHAP-driven feature attribution. Reproducible notebook plus a small inference CLI, tested with pytest.",
+      "tags": ["Python", "scikit-learn", "XGBoost", "SHAP", "pytest"]
+    },
+    {
+      "id": "sample_forecasting",
+      "title": "Sample Time-Series Forecasting",
+      "meta": "Portfolio Project · 2023 · Statistics",
+      "summary": "R-based univariate forecasting on 1,000 daily observations of a public series. ARIMA, ETS, and a decision-rule combining residual and stationarity diagnostics.",
+      "tags": ["R", "ARIMA", "ETS", "Time Series"]
+    },
+    {
+      "id": "example_schema_design",
+      "title": "Example Airport Schema Design",
+      "meta": "Portfolio Project · 2022 · Database Design",
+      "summary": "SQL Server schema for a simplified airport ticketing platform: 7 core entities, integrity enforced by construction with CHECK constraints, UNIQUE constraints, and foreign keys.",
+      "tags": ["SQL Server", "T-SQL", "Schema Design", "Referential Integrity"]
+    }
+  ],
+  "skills": {
+    "production": [
+      "dbt",
+      "PostgreSQL",
+      "Python",
+      "SQL",
+      "FastAPI",
+      "Power BI",
+      "pytest",
+      "GitHub Actions",
+      "Docker"
+    ],
+    "skills_list_only": [
+      "Snowflake",
+      "BigQuery",
+      "Airflow",
+      "Tableau",
+      "AWS",
+      "GCP"
+    ],
+    "research_only": [
+      "scikit-learn",
+      "XGBoost",
+      "SHAP",
+      "ARIMA",
+      "ETS"
+    ]
+  },
+  "honest_boundaries": [
+    "Production warehouse: PostgreSQL. Snowflake / BigQuery are on skills, not production.",
+    "ML scope: applied classification and forecasting in portfolio projects. Not full MLOps."
+  ],
+  "personal_facts": [],
+  "salary_anchors": {
+    "uk_ae_mid": { "min": 55000, "max": 70000, "currency": "GBP", "basis": "12" },
+    "uk_da_mid": { "min": 45000, "max": 60000, "currency": "GBP", "basis": "12" },
+    "de_ae_mid": { "min": 60000, "max": 75000, "currency": "EUR", "basis": "12" }
+  },
+  "availability": "Available immediately",
+  "target_geographies": [
+    "United Kingdom",
+    "Germany",
+    "Remote (EMEA)"
+  ]
+}
