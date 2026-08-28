@@ -35,19 +35,14 @@ If `config/profile.yml` is missing, log `ROUTINE_ABORT: config/profile.yml missi
    - Title does NOT contain `Senior|Sr|Lead|Staff|Principal|Head|Director|VP|Manager` (mid-only band per `modes/_profile.md`)
    - URL not already in Notion (single `notion-search` snapshot upfront against last 30 days, build an in-memory `seen_urls` set)
 
-4. **For each surviving hit**, write a row to the Notion Applications DB via `notion-create-pages`:
-   - `parent`: `{type: "data_source_id", data_source_id: <notion.applications_data_source_id from config/profile.yml>}`
-   - `Company`: title
-   - `Position`: multi_select (array of role-family tags)
-   - `Stage`: `"1. Discovered"`
-   - `Job URL`: dedup key
-   - `Source portal`: one of `LinkedIn, Xing, Stepstone, Handshake, Welcome to the Jungle, eFinancialCareers, Indeed, Greenhouse, Lever, Company site, Other`
-   - `Country`: derived from the hit
-   - `Location`: city / "Remote"
-   - `Company tier`: `"Tier 1 (Target)"` if Company in portals.yml tier-1 list, else `"Tier 2"` if tracked in portals.yml, else `"Tier 3"`
-   - `Agent run ID`: `"morning-scan-{YYYY-MM-DD-HHMM}"`
-   - `date:Discovered date:start`: today (ISO date)
-   - `date:Discovered date:is_datetime`: 0
+4. **Write surviving hits to Notion via the deterministic REST writer** (`scripts/notion/notion-scan-write.mjs`). This is the single supported Stage-1 insert path; the MCP `notion-create-pages` shortcut was removed once the deterministic writer became available, because two writers with different field-inference logic drift silently (Country / Position tags, tier resolution). Do NOT hand-roll `notion-create-pages` calls from inside the routine.
+   ```
+   node scripts/notion/notion-scan-write.mjs --in data/.scan-hits.json --scanner morning-scan
+   ```
+   `notion-scan-write.mjs` is pure Node over the Notion REST API, so it needs only `NOTION_TOKEN` (env) plus `notion.applications_data_source_id` from `config/profile.yml`. If the token is missing, the routine must abort with `ROUTINE_ABORT: NOTION_TOKEN missing — operator needs to provision integration token`. The writer sets:
+   - `parent`: `{type: "data_source_id", data_source_id: <notion.applications_data_source_id>}`
+   - `Company`, `Position`, `Stage = "1. Discovered"`, `Job URL`, `Source portal`, `Country`, `Location`, `Company tier`, `Agent run ID = "morning-scan-{YYYY-MM-DD-HHMM}"`, `Discovered date` = today.
+   - Country / Position inference is **shared with `bd-bulk-scan` via `scripts/notion/notion-stage1.mjs`** — if either scanner needs a field-derivation change, edit `notion-stage1.mjs` so both scanners move together. Do not fork the logic per scanner.
 
 5. **Git commit** the pipeline.md and scan-history.tsv diffs:
    ```
