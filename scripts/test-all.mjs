@@ -67,8 +67,21 @@ const scripts = [
   { name: 'scripts/tracker/dedup-tracker.mjs', expectExit: 0 },
   { name: 'scripts/tracker/merge-tracker.mjs', expectExit: 0 },
   { name: 'scripts/metrics/analyze-patterns.mjs --self-test', expectExit: 0 },
+  // ── Unit tests wired in (all must pass; each test file self-reports) ──
+  { name: 'scripts/net-retry.test.mjs', expectExit: 0 },
   { name: 'scripts/metrics/metrics-core.test.mjs', expectExit: 0 },
+  { name: 'scripts/scan/liveness-core.test.mjs', expectExit: 0 },
+  { name: 'scripts/scan/role-taxonomy.test.mjs', expectExit: 0 },
+  { name: 'scripts/cover-letters/lib/letter-gates.test.js', expectExit: 0 },
+  { name: 'scripts/cover-letters/lib/research.test.js', expectExit: 0 },
+  // match.test.js self-skips cleanly when cv_master.json is absent (fresh clone).
+  { name: 'scripts/cover-letters/lib/match.test.js', expectExit: 0 },
+  { name: 'scripts/cv/profile-enrich.test.mjs', expectExit: 0 },
   { name: 'scripts/test-build-cvs-smoke.mjs', expectExit: 0 },
+  { name: 'scripts/system-eval.test.mjs', expectExit: 0 },
+  { name: 'batch/_autodraft_cv_run.test.mjs', expectExit: 0 },
+  { name: 'batch/_autodraft_crossstage_filter.test.mjs', expectExit: 0 },
+  { name: 'scripts/email/match.test.mjs', expectExit: 0 },
   { name: 'scripts/doctor.mjs', expectExit: 0, allowFail: true },
 ];
 
