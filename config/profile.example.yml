@@ -111,6 +111,32 @@ cv:
 #   # referral_outreach_db_id: "00000000000000000000000000000000"
 #   # referral_outreach_data_source_id: "00000000-0000-0000-0000-000000000000"
 
+# (Optional) Market-aware CV tails — read by scripts/cv/market-tail.cjs.
+# The renderers append ONE market's visa + availability lines per CV, so a
+# recruiter never sees the dual-market hedge. If absent, tails resolve to
+# empty strings and the CV ships without one.
+#
+# Key shape: <market>_<lang>  where market is one of
+# uk | dach | eu | other | general  and lang is en | de.
+# 'other' has no visa key on purpose (don't volunteer "would need sponsorship");
+# 'general' is the dual-market hedge for the published general CV only.
+# market_lines:
+#   visa:
+#     uk_en: "UK Graduate visa, no sponsorship needed for 2 more years."
+#     dach_en: "Eligible to work in Germany via the EU Blue Card (I apply myself)."
+#     dach_de: "Arbeitsberechtigt für Deutschland: Blue Card beantrage ich selbst."
+#     eu_en: "Eligible to work across the EU via the Blue Card (I apply myself)."
+#     eu_de: "Arbeitsberechtigt in der EU über die Blue Card (ich beantrage sie selbst)."
+#     general_en: "UK Graduate visa (no sponsorship for 2 years); Blue Card eligible for Germany and the EU."
+#   availability:
+#     uk_en: "Available immediately."
+#     dach_en: "Ready to relocate; available from offer."
+#     dach_de: "Umzugsbereit; ab sofort verfügbar."
+#     eu_en: "Ready to relocate; available from offer."
+#     eu_de: "Umzugsbereit; ab sofort verfügbar."
+#     other_en: "Available immediately."
+#     general_en: "Available immediately."
+
 # (Optional) Apply-pace targets — read by pace-alarm.mjs. If absent,
 # pace-alarm falls back to sensible defaults (29/day, 25 alarm floor).
 # pace:
