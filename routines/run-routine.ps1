@@ -257,21 +257,60 @@ foreach ($var in $cfg.RequiredEnv) {
 Set-Location $repoRoot
 
 # ── Self-healing helpers ────────────────────────────────────────────
+# NTSTATUS crash exit codes we've observed from headless CLI teardown:
+# 0xC0000005 access violation, 0xC0000409 stack buffer overrun, 0xC000013A
+# CTRL+C, 0xC0000374 heap corruption. A hard crash outranks every log-text
+# signal: an exit code is machine fact where a string match is a guess, and
+# the crash can happen AFTER the routine emitted a valid contract (the work
+# landed) so a "contract valid, exit 0xC0000409" run would otherwise read OK.
+function Test-IsCrashExit($exitCode) {
+    if ($null -eq $exitCode) { return $false }
+    $u = [uint32]$exitCode
+    return ($u -eq 0xC0000005 -or $u -eq 0xC0000409 -or $u -eq 0xC000013A -or $u -eq 0xC0000374)
+}
+
 function Get-FailureMode($content, $exitCode, $timedOut, $contractValid) {
     # Classify why a pass failed so we can decide retry vs skip.
+    # A hard crash outranks every log-text signal — see Test-IsCrashExit.
     if ($timedOut)                                  { return "TIMEOUT" }
-    if ($content -match "session limit")            { return "SESSION_LIMIT" }
+    if (Test-IsCrashExit $exitCode)                 { return "CRASH" }
+    # Quota strings are only trusted when the run did NOT produce output.
+    # $content is the WHOLE log, which includes the routine's own
+    # --- ROUTINE_CONTRACT --- block. A routine that NARRATES a quota event
+    # ("...then the session limit AFTER building artifacts but BEFORE
+    # uploading") would otherwise be classified as having hit one — exit 0,
+    # CONTRACT_VALID True, work landed, and yet FAILURE_MODE reads
+    # SESSION_LIMIT. Machine fact (exit code + contract) wins over string
+    # match.
+    $producedOutput = $contractValid -and $exitCode -eq 0
+    if (-not $producedOutput) {
+        # "rate limit" is deliberately excluded — that one IS transient and
+        # should keep its retries.
+        if ($content -match "weekly limit")                             { return "WEEKLY_LIMIT" }
+        if ($content -match "session limit|usage limit|5-hour limit")   { return "SESSION_LIMIT" }
+    }
     if ([string]::IsNullOrWhiteSpace($content) -or $content.Length -lt 1500) { return "EMPTY_LOG" }
     if (-not $contractValid -and $exitCode -ne 0)   { return "RUNTIME_ERROR" }
     if (-not $contractValid)                        { return "NO_CONTRACT" }
+    # Backstop: a routine that emitted a good contract and exited non-zero is
+    # NOT healthy. Without this, any exit code short of an NTSTATUS crash
+    # still reads as OK.
+    if ($exitCode -ne 0)                            { return "RUNTIME_ERROR" }
     return "OK"
 }
 
 function Should-Retry($mode) {
-    # SESSION_LIMIT is external — retrying within the wrapper window
-    # won't help (Claude quota resets on a fixed schedule, not on demand).
+    # Quota limits are external — retrying within the wrapper window won't
+    # help (quota resets on a fixed schedule, not on demand).
     if ($mode -eq "SESSION_LIMIT") { return $false }
+    if ($mode -eq "WEEKLY_LIMIT")  { return $false }
     if ($mode -eq "OK")            { return $false }
+    # CRASH is deliberately non-retriable. Observed crashes fire during
+    # teardown, AFTER the routine emitted its contract — meaning the work
+    # (scrape, Notion writes) already landed. Retrying would duplicate side
+    # effects to buy nothing, since the fault is deterministic. Alert
+    # instead, and let a human read the log.
+    if ($mode -eq "CRASH")         { return $false }
     return $true
 }
 
@@ -282,8 +321,11 @@ function Test-NeedsManualAttention($routine, $mode) {
     #     today (i.e. compressed Tue/Wed/Thu morning — one shot). On
     #     normal weekdays, AutoDraft re-fires next night at 21:30 so the
     #     wrapper stays silent and lets the schedule retry organically.
-    #   - TIMEOUT / EMPTY_LOG / RUNTIME_ERROR / NO_CONTRACT: always
-    #     manual once retries are exhausted — these don't auto-recover.
+    #   - WEEKLY_LIMIT / CRASH / TIMEOUT / EMPTY_LOG / RUNTIME_ERROR /
+    #     NO_CONTRACT: always manual once retries are exhausted — these
+    #     don't auto-recover. A weekly quota outlasts every fire on the
+    #     schedule; a CRASH is a deterministic native fault that repeats on
+    #     every fire until the code is fixed.
     if ($mode -eq "SESSION_LIMIT") {
         $dow = (Get-Date).DayOfWeek
         $hour = (Get-Date).Hour
@@ -317,13 +359,24 @@ function Write-Alert($routine, $mode, $exitCode, $logPath, $attempts, $finalStat
         suggested_fix  = switch ($mode) {
             "SESSION_LIMIT" {
                 if ($needsAttention) {
-                    "Hit Claude session quota during compressed morning window. Today's submission pipeline is at risk. Re-run manually after quota resets (~3:50am next cycle), or check anthropic.com/account."
+                    "Hit session quota during compressed morning window. Today's submission pipeline is at risk. Re-run manually after quota resets (~3:50am next cycle), or check provider account."
                 } else {
-                    "Wait for Claude session quota reset (typical: 3:50am UK). Routine will retry on next natural fire - no action needed."
+                    "Wait for session quota reset. Routine will retry on next natural fire - no action needed."
                 }
             }
-            "TIMEOUT"       { "Routine exceeded $timeoutSec sec. Investigate: hung claude -p? Stuck MCP? Re-run manually with --verbose." }
-            "EMPTY_LOG"     { "Routine produced no stdout (claude -p missing MCP or pure-script node failure). Check trace + re-run manually." }
+            "WEEKLY_LIMIT" {
+                # Unlike SESSION_LIMIT this outlasts every fire on the schedule, so it
+                # can never be left to recover organically — always manual.
+                "Hit weekly quota. Cannot auto-recover within this week's schedule. Check provider account or wait for weekly reset before re-running."
+            }
+            "CRASH" {
+                # Native fault at process teardown, AFTER the routine emitted its
+                # contract — retrying would duplicate side effects to buy nothing,
+                # since the fault is deterministic. Human reads the log.
+                "Routine crashed at teardown (native fault). The work likely landed before the crash — inspect log tail before re-running to avoid duplicate side effects."
+            }
+            "TIMEOUT"       { "Routine exceeded $timeoutSec sec. Investigate: hung agent CLI? Stuck MCP? Re-run manually with --verbose." }
+            "EMPTY_LOG"     { "Routine produced no stdout (agent CLI missing MCP or pure-script node failure). Check trace + re-run manually." }
             "RUNTIME_ERROR" { "Routine ran but exited non-zero. Check tail of log for stack trace or error message." }
             "NO_CONTRACT"   { "Routine ran but emitted no --- ROUTINE_CONTRACT --- block. Likely silent failure in routine logic. Inspect log + routine.md." }
             default         { "Inspect log: $logPath" }
