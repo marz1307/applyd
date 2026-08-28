@@ -4,24 +4,38 @@
 // Usage:
 //   node scripts/cover-letters/generate.js --job-url <URL> [--company-url <URL>] \
 //        [--role-hint ae|ds|de|da|me] [--app-id <id>] [--company <name>] \
-//        [--country <name>] [--city <name>] [--today YYYY-MM-DD]
+//        [--country <name>] [--city <name>] [--today YYYY-MM-DD] \
+//        [--jd-file <path>]         # caller-supplied JD text (avoids re-fetch)
+//        [--no-qa]                  # skip cv-qa LLM gate
+//        [--no-gates | --strict-gates]   # readability gates: silent report / block
 //
 //   # Bulk mode (re-generate all historical letters from Notion):
 //   node scripts/cover-letters/generate.js --regen-historical --date YYYY-MM-DD
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const crypto = require('node:crypto');
+const { execFileSync, spawnSync } = require('node:child_process');
 const { research } = require('./lib/research');
 const { match } = require('./lib/match');
 const { compose: composeV2 } = require('./lib/draft-v2');
 const { route } = require('./lib/router');
 const { composeForm } = require('./lib/form-drafter');
+const { isPortalHost } = require('./lib/portal-hosts');
+const { runLetterGates } = require('./lib/letter-gates');
 
 const args = process.argv.slice(2);
 const arg = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i+1] : null; };
 const has = (n) => args.includes(n);
 const KEEP_MD = has('--keep-md'); // skip .md deletion so caller can run cv-qa before uploading
+const NO_QA = has('--no-qa');     // skip the deterministic cv-qa LLM gate (e.g. bulk regen / offline)
+// Readability gates default to REPORT, not block: a flagged letter still ships
+// because a row with a mediocre letter beats a row with none, and nothing
+// auto-submits — every draft stops at Stage 3 for human review.
+// --strict-gates makes them blocking for the cases where you would rather have
+// no letter than a bad one.
+const STRICT_GATES = has('--strict-gates');
+const NO_GATES = has('--no-gates');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const CV_MASTER = path.join(ROOT, 'scripts', 'cv', 'cv_master.json');
@@ -46,16 +60,10 @@ function slugify(s) {
   return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50);
 }
 
-// Render a markdown file to PDF, upload to a Notion property, and
-// delete the .md (and any stray .tmp.html scratch) on success so the
-// output dir only ever holds PDFs. If render or upload fails, the .md
-// is retained for retry.
-// Best-effort: any failure logs but does not throw.
 function renderAndUpload(mdPath, pageId, notionProperty) {
   if (!pageId) return { rendered: false, uploaded: false, reason: 'no_page_id' };
   const pdfPath = mdPath.replace(/\.md$/, '.pdf');
   const tmpHtml = mdPath.replace(/\.md$/, '.tmp.html');
-  // Render
   try {
     execFileSync(process.execPath, ['scripts/cover-letters/lib/md-to-pdf.mjs', '--in', mdPath, '--out', pdfPath], {
       cwd: ROOT, stdio: ['ignore', 'ignore', 'pipe'], timeout: 60000,
@@ -64,12 +72,10 @@ function renderAndUpload(mdPath, pageId, notionProperty) {
     console.error(`    ✗ render failed: ${String(e.message || e).slice(0, 100)}`);
     return { rendered: false, uploaded: false, reason: 'render_failed' };
   }
-  // Upload (replace mode — single-file array)
   try {
     execFileSync(process.execPath, ['scripts/notion/notion-upload-file.mjs', '--file', pdfPath, '--page', pageId, '--property', notionProperty], {
       cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000, maxBuffer: 10 * 1024 * 1024,
     });
-    // Success: clean up .md and .tmp.html (unless --keep-md was passed for post-upload cv-qa)
     if (!KEEP_MD) { try { fs.unlinkSync(mdPath); } catch {} }
     try { fs.unlinkSync(tmpHtml); } catch {}
     return { rendered: true, uploaded: true, pdfPath };
@@ -79,8 +85,6 @@ function renderAndUpload(mdPath, pageId, notionProperty) {
   }
 }
 
-// Render to PDF without uploading (used when no Notion target). Same
-// cleanup discipline — .md goes once the PDF is on disk.
 function renderOnly(mdPath) {
   const pdfPath = mdPath.replace(/\.md$/, '.pdf');
   const tmpHtml = mdPath.replace(/\.md$/, '.tmp.html');
@@ -107,8 +111,6 @@ function loadNotionDbId() {
   return null;
 }
 
-// Resolve a Notion pageId from an appId (e.g. "APP-54" → page UUID).
-// Returns null if not found / Notion unreachable.
 async function lookupPageId(appId) {
   const NOTION_TOKEN = process.env.NOTION_TOKEN;
   if (!NOTION_TOKEN) return null;
@@ -128,17 +130,156 @@ async function lookupPageId(appId) {
   } catch { return null; }
 }
 
+// Locate the CV HTML a CV driver wrote for this app under
+// output/cv-drafts/{APPID}-{slug}/cv_{variant}_{lang}.html. Newest cv_*.html
+// wins across every dir matching the app id, so a stale legacy dir cannot
+// win over the current APP-prefixed one.
+function findCvHtml(appId) {
+  const base = path.join(ROOT, 'output', 'cv-drafts');
+  if (!fs.existsSync(base)) return null;
+  const num = String(appId || '').match(/(\d+)/)?.[1];
+  const dirs = fs.readdirSync(base).filter(d =>
+    d === appId || d.startsWith(appId + '-') || (num && (d.startsWith(`APP-${num}-`) || d.startsWith(`${num}-`))));
+  let newest = null;
+  for (const d of dirs) {
+    const dir = path.join(base, d);
+    try {
+      for (const f of fs.readdirSync(dir).filter(f => /^cv_.*\.html$/.test(f))) {
+        const p = path.join(dir, f);
+        const mtime = fs.statSync(p).mtimeMs;
+        if (!newest || mtime > newest.mtime) newest = { p, mtime };
+      }
+    } catch { /* ignore */ }
+  }
+  return newest ? newest.p : null;
+}
+const md5 = (p) => crypto.createHash('md5').update(fs.readFileSync(p)).digest('hex');
+
+// Deterministic LLM QA gate. Runs cv-qa over the CV + this cover letter
+// before upload. cv-qa patches the CL markdown (and CV HTML) in place; the
+// caller re-renders/re-uploads the CV if its HTML changed. Skips gracefully
+// on --no-qa or a missing CV/JD; never blocks the row.
+function runCvQaGate({ appId, company, letterPath, jdText, roleTitle, country, lang }) {
+  if (NO_QA) return { ran: false };
+  const cvHtml = findCvHtml(appId);
+  if (!cvHtml) { console.error(`  [cv-qa] skipped — no CV HTML under output/cv-drafts for ${appId}`); return { ran: false }; }
+  if (!String(jdText || '').trim()) { console.error(`  [cv-qa] skipped — no JD text for ${appId}`); return { ran: false }; }
+  const before = md5(cvHtml);
+  console.error(`  [cv-qa] evaluating CV + cover letter (LLM)...`);
+  const qaArgs = ['scripts/cv/cv-qa.mjs', '--cv', cvHtml, '--cl', letterPath, '--jd', jdText,
+    '--company', company || '', '--role-title', roleTitle || ''];
+  if (country) qaArgs.push('--country', country);
+  if (lang)    qaArgs.push('--lang', lang);
+  const q = spawnSync(process.execPath, qaArgs,
+    { cwd: ROOT, encoding: 'utf8', timeout: 6 * 60 * 1000, stdio: ['ignore', 'inherit', 'inherit'] });
+  const tag = { 0: 'PASS', 2: 'AUTO_PATCHED', 3: 'REGENERATE_NEEDED' }[q.status] || `ERROR(exit ${q.status})`;
+  console.error(`  [cv-qa] ${tag}`);
+  const cvChanged = fs.existsSync(cvHtml) && md5(cvHtml) !== before;
+  return { ran: true, status: q.status, cvHtml, cvChanged };
+}
+
+// Hiring-manager readability gates. Runs AFTER cv-qa so it judges the letter
+// that will actually ship, not the pre-patch draft. See
+// cover-letters/lib/letter-gates.js for the checks and thresholds.
+//
+// The verdict is appended to the letter's audit comment (which the renderer
+// strips, so it never reaches the page) and echoed with a greppable
+// LETTER_GATES marker for the routine logs. Non-blocking unless --strict-gates.
+function runReadabilityGates({ appId, company, letterPath }) {
+  if (NO_GATES) return { ran: false };
+  let md;
+  try { md = fs.readFileSync(letterPath, 'utf8'); }
+  catch { console.error(`  [gates] skipped — cannot read ${letterPath}`); return { ran: false }; }
+
+  const res = runLetterGates(md, { company });
+  if (res.pass) {
+    console.error(`  [gates] PASS (${res.metrics.distinctTech} tech terms, ${res.metrics.words} words)`);
+  } else {
+    console.error(`  [gates] LETTER_GATES_FAIL ${appId}: ${res.failures.map(f => f.code).join(', ')}`);
+    for (const f of res.failures) console.error(`     ${f.code}: ${f.detail}`);
+  }
+
+  // Record the verdict inside the letter itself. A letter that shipped
+  // flagged should say so on its face; otherwise the only trace is a log
+  // nobody reads.
+  try {
+    const stamp = [
+      ` letter_gates: ${res.pass ? 'PASS' : 'FAIL'}`,
+      ...(res.pass ? [] : res.failures.map(f => `  - ${f.code}: ${f.detail}`)),
+      ` letter_gates_metrics: ${JSON.stringify(res.metrics)}`,
+    ].join('\n');
+    fs.writeFileSync(letterPath, md.includes('<!--')
+      ? md.replace(/-->\s*$/, `${stamp}\n-->\n`)
+      : `${md}\n<!--\n${stamp}\n-->\n`);
+  } catch (e) {
+    console.error(`  [gates] could not stamp audit block: ${String(e.message).slice(0, 80)}`);
+  }
+  return { ran: true, pass: res.pass, failures: res.failures, metrics: res.metrics };
+}
+
+// Caller-supplied JD text (--jd-file). Returns '' when absent, unreadable, or
+// too short to be a real posting — every caller treats '' as "no JD supplied".
+function readJdFile(p) {
+  if (!p) return '';
+  try {
+    const t = fs.readFileSync(p, 'utf8');
+    if (t.trim().length > 200) return t;
+    console.error(`  [jd] --jd-file too short (${t.trim().length} chars), ignoring`);
+  } catch (e) { console.error(`  [jd] --jd-file unreadable: ${e.message}`); }
+  return '';
+}
+
 async function generateOne({ jobUrl, companyUrl, roleHint, appId, company, country, city, today, usedAngles, pageId, uploadToNotion = true, seniority }) {
   const cvMaster = loadCvMaster();
   console.error(`[research] ${appId} ${company || ''} ${jobUrl}`);
-  const brief = await research({ jobUrl, companyUrl, roleHint, appId, companyHint: company });
+  // Read --jd-file HERE, not further down: research() needs the JD to exist,
+  // and its own Firecrawl pull goes through a localhost daemon that is
+  // routinely down. Handing the caller's text in means a JD sitting on disk
+  // is enough — before this, research() bailed with jd_fetch_failed and the
+  // --jd-file read below was never reached.
+  const suppliedJd = readJdFile(arg('--jd-file'));
+  const brief = await research({
+    jobUrl, companyUrl, roleHint, appId, companyHint: company, jdText: suppliedJd,
+  });
   brief.fetched_at = (today || new Date().toISOString().slice(0, 10)) + 'T00:00:00Z';
   if (brief.error) {
     console.error(`  ✗ ${brief.error}`);
     return null;
   }
-  // Persist brief
+  // Persist brief. An operator hand-sourcing a missing postal address into
+  // the brief JSON would otherwise be silently discarded by a re-run:
+  // research rebuilds the brief from scratch. Carry forward envelope fields
+  // from an existing brief whenever this run failed to source them itself.
   const briefPath = path.join(BRIEFS_DIR, `${appId}-${slugify(company || brief.company || 'co')}.json`);
+  // A prior brief flagged `company_address_manual` was verified by hand
+  // against the employer's own Impressum or a statutory register, so it
+  // OVERRIDES this run's research wholesale — otherwise a portal-derived
+  // address (research finding the job board's own registered office) silently
+  // wins over the correct one.
+  const ENVELOPE_KEYS = ['company_address', 'company_postal_code', 'company_city',
+                         'company_country', 'company_legal_form', 'company_address_source'];
+  // A prior brief written BEFORE research.js learned to skip job-portal
+  // imprints carries that portal's own registered office. research now
+  // correctly declines to source it, which leaves the envelope empty — and
+  // the carry-forward below would then restore the poisoned value, defeating
+  // the guard. Shared portal-host list (cover-letters/lib/portal-hosts.js) —
+  // same definition research.js uses for its Impressum/supplemental skips,
+  // so the two guards can never drift apart.
+  const inheritable = (prior) => !isPortalHost(String(prior.company_address_source || ''));
+  if (fs.existsSync(briefPath)) {
+    try {
+      const prior = JSON.parse(fs.readFileSync(briefPath, 'utf8'));
+      if (!inheritable(prior)) {
+        brief.fetch_failures = brief.fetch_failures || [];
+        brief.fetch_failures.push(`prior-brief envelope discarded: address sourced from ${prior.company_address_source} (job portal, not the employer)`);
+      } else if (prior.company_address_manual && prior.company_address) {
+        for (const k of ENVELOPE_KEYS) if (prior[k]) brief[k] = prior[k];
+        brief.company_address_manual = true;
+      } else {
+        for (const k of ENVELOPE_KEYS) if (!brief[k] && prior[k]) brief[k] = prior[k];
+      }
+    } catch { /* unreadable prior brief is not a reason to fail the run */ }
+  }
   fs.writeFileSync(briefPath, JSON.stringify(brief, null, 2));
 
   // Match stage needs JD text — re-pull from cache for the markdown body
@@ -148,6 +289,35 @@ async function generateOne({ jobUrl, companyUrl, roleHint, appId, company, count
     const jd = firecrawl(jobUrl);
     jdText = jd?.markdown || '';
   } catch {}
+  // --jd-file: JD text the CALLER already fetched. The firecrawl pull above
+  // goes through the self-hosted localhost daemon, which is regularly down
+  // and returns nothing; with no JD the matcher falls back to parsing the
+  // job_url SLUG for a tech stack, which invents tools. Callers that already
+  // have verified JD text (routines that write output/cv-drafts/<dir>/jd.txt,
+  // for example) should hand it over. File wins over the daemon: it is
+  // verified content, not a cache guess.
+  if (suppliedJd) {
+    jdText = suppliedJd;
+    console.error(`  [jd] using --jd-file (${suppliedJd.length} chars)`);
+  }
+  // Drop slug-derived stack facts the real JD does not support. research()
+  // marks these `source: job_url`; when we have verified JD text, any tool
+  // named in such a fact but absent from the posting is a parse artefact,
+  // not a fact.
+  if (jdText.trim().length > 200 && Array.isArray(brief.facts)) {
+    const before = brief.facts.length;
+    brief.facts = brief.facts.filter(f => {
+      if (f.source !== 'job_url' || f.category !== 'tech_stack') return true;
+      const tools = String(f.fact).match(/[A-Za-z][A-Za-z0-9+#.]{1,}/g) || [];
+      const named = tools.filter(t => new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(jdText));
+      // Keep only if every tool it claims actually appears in the posting.
+      return named.length === tools.length;
+    });
+    if (brief.facts.length !== before) {
+      console.error(`  [jd] dropped ${before - brief.facts.length} slug-derived stack fact(s) unsupported by the posting`);
+      fs.writeFileSync(briefPath, JSON.stringify(brief, null, 2));
+    }
+  }
 
   console.error(`  [match] ${brief.facts.length} facts, employer-angle scoring...`);
   const matchBrief = match({ brief, cvMaster, jdText, roleHint, country, appId, usedAngles, seniority });
@@ -156,9 +326,9 @@ async function generateOne({ jobUrl, companyUrl, roleHint, appId, company, count
   fs.writeFileSync(matchPath, JSON.stringify(matchBrief, null, 2));
 
   // Stage 0: Route
-  // --force-lang de|en overrides the auto-detected posting language. Use it when a
-  // DACH employer (GmbH/AG) posts in English on LinkedIn but the letter should be
-  // German anyway (RULE 1) — the router otherwise picks RULE 2 (English prose).
+  // --force-lang de|en overrides the auto-detected posting language. Use it
+  // when a DACH employer (GmbH/AG) posts in English on LinkedIn but the
+  // letter should be German anyway.
   const forceLang = arg('--force-lang');
   const routeBrief = route({
     appId, postingText: jdText, postingLang: forceLang || brief.posting_lang,
@@ -181,26 +351,73 @@ async function generateOne({ jobUrl, companyUrl, roleHint, appId, company, count
   const formMd = composeForm({
     brief, matchBrief, cvMaster, jobUrl, today, country, city,
     applyUrl: jobUrl, applyChannel: 'web_form',
-    briefPath: briefPath.replace(/^.*applyd[\/\\]/, ''),
-    matchPath: matchPath.replace(/^.*applyd[\/\\]/, ''),
+    briefPath: path.relative(ROOT, briefPath),
+    matchPath: path.relative(ROOT, matchPath),
+    seniority,
   });
   const formName = `${appId}-${slugify(company || brief.company || 'co')}-${today || new Date().toISOString().slice(0, 10)}-form.md`;
   const formPath = path.join(FORM_OUT_DIR, formName);
   fs.writeFileSync(formPath, formMd);
   console.error(`  ✓ ${formPath}`);
 
-  // Auto-render + upload to Notion. Letter → "Cover Letter" property,
-  // Form → "Form answers" property. Both replace-uploads.
-  // On success the .md and any .tmp.html scratch are deleted so the
-  // output folder ends up with PDFs ONLY (user rule: no markdowns).
+  // Deterministic LLM QA gate over the CV + cover letter (patches in place).
+  // country + lang route the QA-side market classification through the same
+  // cv/market-tail.cjs helper the build uses — one source of truth, no drift.
+  const qa = runCvQaGate({
+    appId, company: company || brief.company, letterPath, jdText,
+    roleTitle: brief.job_title,
+    country: country || brief.country || '',
+    lang: routeBrief.letter_language || '',
+  });
+
+  // Readability gates run after cv-qa (which patches the letter in place),
+  // so they judge exactly what is about to be rendered and uploaded.
+  const gates = runReadabilityGates({
+    appId, company: company || brief.company, letterPath,
+  });
+
   let letterUpload = { rendered: false, uploaded: false, reason: 'disabled' };
   let formUpload = { rendered: false, uploaded: false, reason: 'disabled' };
-  if (uploadToNotion) {
+  if (STRICT_GATES && gates.ran && !gates.pass) {
+    // Deliberate: the .md is KEPT here regardless of --keep-md, because the
+    // whole point of blocking is that someone fixes and re-ships it. Deleting
+    // the source of a letter you just refused to send would be perverse.
+    console.error(`  [gates] --strict-gates: upload BLOCKED for ${appId}. Letter kept at ${letterPath}`);
+    letterUpload = { rendered: false, uploaded: false, reason: 'blocked_by_letter_gates', failures: gates.failures.map(f => f.code) };
+  } else if (uploadToNotion) {
     if (!pageId) pageId = await lookupPageId(appId);
     if (pageId) {
       console.error(`  [upload] rendering letter PDF + uploading to Notion 'Cover Letter'...`);
       letterUpload = renderAndUpload(letterPath, pageId, 'Cover Letter');
       if (letterUpload.uploaded) console.error(`  ✓ Cover Letter uploaded to ${pageId.slice(0, 8)}…`);
+      // If cv-qa patched the CV HTML, re-render the CV PDF and refresh the
+      // Resume so the uploaded CV matches the QA-patched HTML.
+      if (qa && qa.cvChanged) {
+        try {
+          const dir = path.dirname(qa.cvHtml);
+          // SANITY GATE: never render/upload a CV that has lost its markup.
+          // A cv-qa bug once wrote stripped plain text over the HTML and the
+          // uploader faithfully shipped the unstyled result to Notion as the
+          // Resume. cv-qa now guards its own write; this is the second line
+          // of defence, because the upload is the irreversible step.
+          const cvHtmlNow = fs.readFileSync(qa.cvHtml, 'utf8');
+          const tagCount = (cvHtmlNow.match(/<[a-zA-Z][^>]*>/g) || []).length;
+          if (tagCount < 20) {
+            throw new Error(`CV HTML looks stripped (${tagCount} tags) — refusing to render/upload`);
+          }
+          const pdfName = fs.readdirSync(dir).find(f => /\.pdf$/i.test(f));
+          const cvPdf = path.join(dir, pdfName || 'cv.pdf');
+          execFileSync(process.execPath, ['scripts/cv/html-to-pdf.mjs', '--in', qa.cvHtml, '--out', cvPdf], {
+            cwd: ROOT, timeout: 90000, stdio: ['ignore', 'pipe', 'pipe'],
+          });
+          execFileSync(process.execPath, ['scripts/notion/notion-upload-file.mjs', '--file', cvPdf, '--page', pageId, '--property', 'Resume'], {
+            cwd: ROOT, timeout: 60000, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 10 * 1024 * 1024,
+          });
+          console.error(`  [cv-qa] CV HTML was patched → re-rendered CV PDF + refreshed Resume`);
+        } catch (e) {
+          console.error(`  [cv-qa] CV re-render/upload failed: ${String(e.message || e).slice(0, 100)}`);
+        }
+      }
       console.error(`  [upload] rendering form PDF + uploading to Notion 'Form answers'...`);
       formUpload = renderAndUpload(formPath, pageId, 'Form answers');
       if (formUpload.uploaded) console.error(`  ✓ Form answers uploaded to ${pageId.slice(0, 8)}…`);
@@ -215,12 +432,11 @@ async function generateOne({ jobUrl, companyUrl, roleHint, appId, company, count
     formUpload = renderOnly(formPath);
   }
 
-  return { briefPath, matchPath, letterPath, formPath, brief, matchBrief, letterUpload, formUpload };
+  return { briefPath, matchPath, letterPath, formPath, brief, matchBrief, letterUpload, formUpload, gates };
 }
 
 async function regenHistorical(date) {
   if (!date) date = new Date().toISOString().slice(0, 10);
-  // Find historical letters by date, query Notion for each appId's Job URL.
   const NOTION_TOKEN = process.env.NOTION_TOKEN;
   if (!NOTION_TOKEN) { console.error('NOTION_TOKEN unset'); process.exit(5); }
   const NH = { Authorization: 'Bearer ' + NOTION_TOKEN, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
@@ -231,12 +447,9 @@ async function regenHistorical(date) {
   const results = [];
   const usedAngles = { internal_product: 0, attribution: 0, infrastructure: 0, data_quality: 0, modelling: 0, sole_owner: 0 };
   for (const f of files) {
-    // Filename: <appId>-<company>-<date>.md  (appId may be 2-4 digits or "APP-NN")
     const m = f.match(/^(APP-?)?(\d+)-([a-z0-9-]+)-\d{4}-\d{2}-\d{2}\.md$/i);
     if (!m) { console.error(`  ? skip unrecognised: ${f}`); continue; }
     const appNum = parseInt(m[2], 10);
-    const companySlug = m[3];
-    // Query Notion (with retry on transient network errors)
     let d = null;
     for (let attempt = 1; attempt <= 4; attempt++) {
       try {
@@ -270,7 +483,7 @@ async function regenHistorical(date) {
     try {
       const result = await generateOne({
         jobUrl, roleHint, appId: `APP-${appNum}`, company, country, city, today: new Date().toISOString().slice(0, 10), usedAngles,
-        pageId: row.id,  // skip the lookup — caller already has it
+        pageId: row.id,
       });
       if (result) {
         results.push({ appNum, company, ...result });
@@ -293,7 +506,7 @@ async function regenHistorical(date) {
   }
   const jobUrl = arg('--job-url');
   if (!jobUrl) {
-    console.error('Usage: node scripts/cover-letters/generate.js --job-url <URL> [--role-hint ae|ds|de|da|me] [--app-id <id>] [--company <name>]');
+    console.error('Usage: node scripts/cover-letters/generate.js --job-url <URL> [--role-hint ae|ds|de|da|me] [--app-id <id>] [--company <name>] [--jd-file <path>]');
     console.error('   or: node scripts/cover-letters/generate.js --regen-historical --date YYYY-MM-DD');
     process.exit(2);
   }
