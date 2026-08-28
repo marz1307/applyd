@@ -30,7 +30,13 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { promisify } from "node:util";
+import { createRequire } from "node:module";
 import { applyRoleTitle } from "./jd-role-title.mjs";
+import { enrichProfile } from "./profile-enrich.mjs";
+import { logProfileSource } from "./profile-source-log.mjs";
+const require = createRequire(import.meta.url);
+const MT = require("./market-tail.cjs");
+const PS = require("./project-scoring.cjs");
 
 const readFileAsync = promisify(readFile);
 const writeFileAsync = promisify(writeFile);
@@ -42,7 +48,7 @@ const DACH_COUNTRIES = new Set(["DE", "AT", "CH", "GERMANY", "AUSTRIA", "SWITZER
 // ── arg parsing ──────────────────────────────────────────────────────────
 function parseArgs(argv) {
   if (argv.includes("--help") || argv.includes("-h")) {
-    console.log('Usage: node generate-pdf-tailored.mjs --company <name> [--archetype AE|DS|DE|BI] [--lang en|de] [--country <ISO>] [--role-title "<JD title>"] [--keywords a,b,c] [--date YYYY-MM-DD] [--with-photo|--no-photo] [--max-pages N] [--profile-text "<text>"]');
+    console.log('Usage: node generate-pdf-tailored.mjs --company <name> [--archetype AE|DS|DE|BI] [--lang en|de] [--country <ISO>] [--role-title "<JD title>"] [--keywords a,b,c] [--date YYYY-MM-DD] [--with-photo|--no-photo] [--dach-format|--no-dach-format] [--max-pages N] [--profile-text "<text>"] [--seniority mid|graduate|senior] [--jd-file <path>] [--jd-text "<text>"]');
     process.exit(0);
   }
   const args = {
@@ -66,9 +72,19 @@ function parseArgs(argv) {
     else if (a === "--lang") { args.lang = argv[++i].toLowerCase(); args.langExplicit = true; }
     else if (a === "--no-photo") args.noPhoto = true;
     else if (a === "--with-photo") args.withPhoto = true;
+    else if (a === "--dach-format") args.dachFormatExplicit = true;
+    else if (a === "--no-dach-format") args.noDachFormat = true;
     else if (a === "--max-pages") args.maxPages = parseInt(argv[++i], 10);
     else if (a === "--profile-text") args.profileText = argv[++i];
     else if (a === "--role-title") args.roleTitle = argv[++i];
+    else if (a === "--seniority") args.seniority = argv[++i].toLowerCase();
+    else if (a === "--job-url") args.jobUrl = argv[++i];
+    else if (a === "--jd-text") args.jdText = argv[++i];
+    else if (a === "--jd-file") {
+      const p = argv[++i];
+      try { args.jdText = readFileSync(p, "utf8"); }
+      catch (e) { console.warn(`⚠ --jd-file ${p} unreadable: ${e.message}`); }
+    }
   }
 
   // Language resolution:
@@ -78,10 +94,21 @@ function parseArgs(argv) {
   if (!args.lang) args.lang = isDachCountry ? "de" : "en";
   args.isDachCountry = isDachCountry;
 
-  // Photo trigger is now JD-language-driven, not country-driven:
-  //   - DE Lebenslauf → photo by default; --no-photo override drops it
-  //   - EN CV         → no photo by default; --with-photo override adds it
-  args.includePhoto = args.lang === "de" ? !args.noPhoto : args.withPhoto;
+  // DACH presentation for an ENGLISH CV (photo + Personal Details, the format
+  // a German-market recruiter expects). Auto-ON when country is DACH and JD
+  // language is English. --dach-format forces it on, --no-dach-format forces
+  // it off.
+  args.dachFormat = args.noDachFormat
+    ? false
+    : (!!args.dachFormatExplicit || (isDachCountry && args.lang === "en"));
+
+  // Photo trigger is JD-language-driven, plus DACH presentation:
+  //   - DE Lebenslauf   → photo by default; --no-photo override drops it
+  //   - EN + DACH format → photo by default; --no-photo override drops it
+  //   - EN otherwise    → no photo by default; --with-photo override adds it
+  args.includePhoto = args.lang === "de"
+    ? !args.noPhoto
+    : (args.withPhoto || (args.dachFormat && !args.noPhoto));
 
   if (!args.cv) args.cv = args.lang === "de" ? "cv-de.md" : "cv.md";
   if (!args.archetype) args.archetype = "AE";
@@ -184,45 +211,82 @@ function reorderSkills(skillsBlock, archetype) {
   return ordered.join("\n");
 }
 
-// JD-driven project selection (implemented 2026-07-03 — was a no-op stub).
-// Scores every project in cv/project-pool.json against the JD keywords and
-// the archetype, pins the dissertation first, and returns the top
-// `max_projects` as a markdown block in the cv.md Projects format. The pool
-// spans the 4 CV-core projects PLUS the portfolio-only inventory from
-// article-digest.md (SQL Server schema design, R regression, clinical trials,
-// NLP sentiment, Power BI dashboard, MCP server), so a Power-BI-heavy JD gets
-// the dashboard project and an NLP JD gets the RoBERTa study. Selection
-// REPLACES, never adds — max_projects (4) protects the 2-page rule.
-// Falls back to the cv.md block untouched when the pool file is absent.
-function reorderProjects(projectsBlock, archetype, keywords = [], lang = "en") {
-  const poolPath = resolve(__dirname, "project-pool.json");
-  if (!existsSync(poolPath)) return projectsBlock;
-  let pool;
-  try { pool = JSON.parse(readFileSync(poolPath, "utf8")); }
-  catch { return projectsBlock; }
+// JD-driven project selection. Delegates to the shared deterministic scorer
+// (project-scoring.cjs) so this file and build-cvs.js agree on rankings.
+// Scoring: archetype fit * 10 + strong_kw * 3 * section_weight + weak_kw
+// + impact - anti_kw * 100 + (pinned ? 1000 : 0). See project-scoring.cjs
+// for the full formula. Selection REPLACES, never adds — max_projects
+// protects the 2-page rule. Falls back to the cv.md block when the pool
+// file is absent.
+function reorderProjects(projectsBlock, archetype, keywords = [], lang = "en", jdText = "") {
+  const pool = PS.loadPool();
+  if (!pool) return projectsBlock;
 
-  const kw = (keywords || []).map(k => String(k).toLowerCase());
   const arch = String(archetype || "AE").toUpperCase();
   const bodyKey = lang === "de" ? "md_de" : "md_en";
+  // Prefer full JD text when available; fall back to keyword blob otherwise.
+  const scoringText = (jdText && String(jdText).trim())
+    || (keywords || []).map(String).join(" ");
 
-  const scored = (pool.projects || [])
-    .filter(p => p[bodyKey])
-    .map(p => {
-      let s = (p.archetypes && p.archetypes[arch]) || 0;
-      for (const k of kw) {
-        if ((p.keywords || []).some(pk => k.includes(pk.trim()) || pk.trim().includes(k))) s += 2;
-      }
-      if (p.pinned) s += 100; // dissertation always leads
-      return { p, s };
-    })
-    .sort((a, b) => b.s - a.s);
+  const ids = PS.selectProjectIds({ pool, archetype: arch, jdText: scoringText });
+  if (!ids || !ids.length) return projectsBlock;
 
-  const maxN = pool.max_projects || 4;
-  const picked = scored.slice(0, maxN).filter(x => x.s > 0);
-  if (!picked.length) return projectsBlock;
+  const byId = new Map(pool.projects.map(p => [p.id, p]));
+  const archKey = arch.toLowerCase();
+  const variantsKey = "variants_" + lang;
+  const bodyFor = (p) => (p[variantsKey] && p[variantsKey][archKey]) || p[bodyKey];
 
-  console.log(`🧩 Projects selected [${arch}, ${kw.length} kw]: ${picked.map(x => `${x.p.id}(${x.s})`).join(", ")}`);
-  return picked.map(x => x.p[bodyKey]).join("\n\n");
+  const picks = ids.map(id => byId.get(id)).filter(Boolean).filter(p => p[bodyKey]);
+  if (!picks.length) return projectsBlock;
+
+  console.log(`🧩 Projects selected [${arch}, JD ${scoringText.length}ch]: ${picks.map(p => `${p.id}${(p[variantsKey] && p[variantsKey][archKey]) ? "*" : ""}`).join(", ")}${picks.some(p => p[variantsKey] && p[variantsKey][archKey]) ? "  (* = archetype variant)" : ""}`);
+  return picks.map(p => bodyFor(p)).join("\n\n");
+}
+
+// Per-archetype experience block override (experience-pool.json). For each
+// role block in the cv.md experience section, look up a matching entry by
+// slug / cv_header_match; if a variant for this archetype+lang exists,
+// replace the whole role block. Falls back to the cv.md block untouched when
+// no override matches or the pool is absent.
+function reorderExperience(experienceBlock, archetype, lang = "en") {
+  const populated = resolve(__dirname, "experience-pool.json");
+  const example = resolve(__dirname, "experience-pool.example.json");
+  const poolPath = existsSync(populated) ? populated : (existsSync(example) ? example : null);
+  if (!poolPath) return experienceBlock;
+  let pool;
+  try { pool = JSON.parse(readFileSync(poolPath, "utf8")); }
+  catch { return experienceBlock; }
+
+  const arch = String(archetype || "AE").toUpperCase();
+  const archKey = arch.toLowerCase();
+  const variantsKey = "variants_" + lang;
+  const overrides = pool.experiences || [];
+
+  const parts = experienceBlock.split(/^### /m);
+  const preamble = parts[0];
+  const roles = parts.slice(1);
+
+  const swapped = [];
+  for (const role of roles) {
+    const header = role.split("\n", 1)[0] || "";
+    const match = overrides.find((o) => {
+      const needle = String(o.cv_header_match || o.slug || "").toLowerCase();
+      return needle && header.toLowerCase().includes(needle);
+    });
+    const variant = match && match[variantsKey] && match[variantsKey][archKey];
+    if (variant) {
+      // Variant is a FULL role block starting with "### ...". Strip the
+      // leading "### " and ensure a trailing "\n\n" so /^### /m still splits
+      // consecutive roles cleanly.
+      let stripped = variant.replace(/^###\s+/, "");
+      if (!stripped.endsWith("\n\n")) stripped = stripped.replace(/\n*$/, "\n\n");
+      swapped.push(stripped);
+      console.log(`👔 Experience swap [${arch}/${lang}]: ${match.slug} → archetype variant`);
+    } else {
+      swapped.push(role);
+    }
+  }
+  return preamble + swapped.map((r) => "### " + r).join("");
 }
 
 // ── HTML rendering ──────────────────────────────────────────────────────
@@ -332,11 +396,12 @@ function projectsBlockToHtml(md) {
 }
 
 function skillsBlockToHtml(md) {
-  // Canonical layout: ONE paragraph with bold category labels separated by spaces,
-  // mirroring cv_english.pdf where Languages / Warehousing / Transformation flow inline.
+  // One tier per line — each `**Label:** items` becomes its own paragraph so
+  // a specific technology can be spotted at a scan. The old wall-of-text
+  // layout hid single technologies inside a dense block.
   const rows = md.split("\n").filter(l => l.trim());
   if (!rows.length) return "";
-  return `<p class="skills-paragraph">${rows.map(r => mdToInlineHtml(r)).join(" ")}</p>`;
+  return rows.map(r => `<p class="skills-paragraph">${mdToInlineHtml(r)}</p>`).join("\n");
 }
 
 function competenciesToHtml(keywords) {
@@ -355,6 +420,57 @@ function countPdfPages(pdfPath) {
   } catch {
     return 0;
   }
+}
+
+// ── Dynamic profile generation ──────────────────────────────────────────
+// Build a JD-specific profile paragraph from archetype + keywords + seniority
+// instead of using the static cv.md profile. The profile is the first thing a
+// recruiter reads — it must draw a direct line from the candidate to THIS
+// role. Templates are intentionally generic and metric-free (Profile is
+// positioning, numbers live in Experience and Projects). Downstream editors
+// should replace the archetype-specific text via config or --profile-text
+// rather than editing this file per-user.
+const GRAD_SIGNALS_CV = /\b(graduate|grad\b|entry[- ]level|junior|trainee|werkstudent|praktikant|apprentice|new grad|recent grad|class of|programme 202|program 202|early career)\b/i;
+
+const ARCHETYPE_PROFILES = {
+  AE: {
+    graduate: (kw) => `Analytics Engineering graduate with production pipeline exposure: dbt models in dimensional design, CI-gated data quality, and a deterministic entity spine resolved out of messy source data.${kw.length ? ` Hands-on with ${kw.slice(0, 3).join(', ')}.` : ''} Looking for a structured environment to grow this foundation at scale.`,
+    mid: (kw) => `Analytics Engineer with production experience across B2B SaaS analytics. Specialist in dbt dimensional modelling and CI-gated data quality, in Python and SQL.${kw.length ? ` Working across ${kw.slice(0, 3).join(', ')}.` : ''} Shipped end-to-end customer data layers on deduplicated entity spines under a test-gated release process.`,
+  },
+  DS: {
+    graduate: (kw) => `Data Science graduate combining applied ML with production data engineering: gradient-boosted classification with model explanations, plus deployment into a live warehouse rather than a sandbox.${kw.length ? ` Skills include ${kw.slice(0, 3).join(', ')}.` : ''} Seeking a role that pairs mentorship with real analytical ownership.`,
+    mid: (kw) => `Data Scientist with applied ML and analytics experience in B2B SaaS. Specialist in explainable ML and production-shape modelling, in Python and scikit-learn.${kw.length ? ` Working across ${kw.slice(0, 3).join(', ')}.` : ''} Shipped classification and forecasting models on data layers built end to end.`,
+  },
+  DE: {
+    graduate: (kw) => `Data Engineering graduate with production pipeline experience: Python extractors, orchestrated workflows, containerised deployment, and CI-gated transformations running to a schedule.${kw.length ? ` Hands-on with ${kw.slice(0, 3).join(', ')}.` : ''} Looking for a team where I can deepen my engineering practice.`,
+    mid: (kw) => `Data Engineer with production pipeline experience across ingestion and dimensional modelling. Specialist in orchestration and infrastructure, in Python and SQL.${kw.length ? ` Working across ${kw.slice(0, 3).join(', ')}.` : ''} Shipped an extractor + transformation stack under CI, deployed on managed cloud.`,
+  },
+  DA: {
+    graduate: (kw) => `Data Analytics graduate with hands-on delivery across BI tools, Python, and SQL, plus production data-layer experience in dbt dimensional modelling.${kw.length ? ` Skills include ${kw.slice(0, 3).join(', ')}.` : ''} Comfortable owning a question end to end, from the warehouse model to the dashboard a stakeholder reads.`,
+    mid: (kw) => `Data Analyst with production experience in B2B SaaS analytics and stakeholder-facing reporting. Specialist in BI dashboards, in SQL and Python.${kw.length ? ` Working across ${kw.slice(0, 3).join(', ')}.` : ''} Delivered dashboards that replaced manual reporting cycles with live self-serve numbers.`,
+  },
+  BI: {
+    graduate: (kw) => `BI graduate with production delivery: dashboards that replaced a manual reporting cycle with live figures, built on dimensional models in classic warehouse design.${kw.length ? ` Hands-on with ${kw.slice(0, 3).join(', ')}.` : ''} Seeking a BI role with mentorship.`,
+    mid: (kw) => `BI Developer with production experience across analytics and reporting. Specialist in dashboards and dimensional modelling, in DAX and SQL.${kw.length ? ` Working across ${kw.slice(0, 3).join(', ')}.` : ''} Shipped modelled marts and dashboards that cut multi-day reporting cycles to live.`,
+  },
+  ME: {
+    graduate: (kw) => `ML Engineering graduate with model-serving experience: an API service with authentication and Row-Level Security serving classification and forecasting models in production.${kw.length ? ` Skills include ${kw.slice(0, 3).join(', ')}.` : ''} Seeking a structured ML engineering role.`,
+    mid: (kw) => `ML Engineer with experience serving predictive models on production data platforms in B2B SaaS. Specialist in model serving and explainability.${kw.length ? ` Working across ${kw.slice(0, 3).join(', ')}.` : ''} Deployed classification and survival models with model-explanation attached, on production data layers built end to end.`,
+  },
+};
+
+function detectSeniorityFromJd(jdText, roleTitle, explicit) {
+  if (explicit) return explicit;
+  const t = (jdText || '') + ' ' + (roleTitle || '');
+  if (GRAD_SIGNALS_CV.test(t)) return 'graduate';
+  if (/\b(senior|staff|principal|lead|head of|director|vp)\b/i.test(t)) return 'senior';
+  return 'mid';
+}
+
+function generateDynamicProfile(archetype, keywords, seniority) {
+  const arch = ARCHETYPE_PROFILES[archetype] || ARCHETYPE_PROFILES.AE;
+  const band = (seniority === 'graduate' || seniority === 'junior') ? 'graduate' : 'mid';
+  return arch[band](keywords || []);
 }
 
 // ── main ────────────────────────────────────────────────────────────────
@@ -390,10 +506,103 @@ async function main() {
   const portfolio = profileGet("portfolio_url");
   const github = profileGet("github") || "";
 
-  const profileBody = args.profileText || sections.profile;
+  // Profile priority:
+  //   1. explicit --profile-text (author override) — wins unconditionally
+  //   2. LLM enrichment via profile-enrich.mjs — when JD text is available
+  //      AND APPLYD_PROFILE_ENRICH != '0'; falls back on any guardrail fail
+  //   3. Hardcoded ARCHETYPE_PROFILES template — when JD/keywords/seniority
+  //      is known but the LLM path is unavailable
+  //   4. Static cv.md profile — final fallback
+  const seniority = detectSeniorityFromJd(args.jdText || '', args.roleTitle || '', args.seniority);
+  let profileBody;
+  let profileSource;
+  if (args.profileText) {
+    profileBody = args.profileText;
+    profileSource = 'explicit-profile-text';
+  } else if (args.jdText && process.env.APPLYD_PROFILE_ENRICH !== '0') {
+    console.log(`📝 Attempting LLM profile enrichment (JD ${args.jdText.length} chars, ${args.archetype}/${seniority})...`);
+    try {
+      const enriched = await enrichProfile({
+        jdText: args.jdText,
+        company: args.company,
+        roleTitle: args.roleTitle,
+        archetype: args.archetype,
+        seniority,
+        keywords: args.keywords,
+        country: args.country,
+        lang: args.lang,
+      });
+      if (enriched && enriched.profile) {
+        profileBody = enriched.profile;
+        profileSource = `llm-enriched (${enriched.word_count} words)`;
+        console.log(`📝 LLM profile: "${profileBody.slice(0, 90)}..."`);
+      } else {
+        const reason = enriched ? enriched.reason : 'no-result';
+        console.warn(`⚠ LLM enrichment failed (${reason}); falling back to template.`);
+        profileBody = generateDynamicProfile(args.archetype, args.keywords, seniority);
+        profileSource = `template-fallback (${reason})`;
+      }
+    } catch (e) {
+      console.warn(`⚠ LLM enrichment crashed (${e.message}); falling back to template.`);
+      profileBody = generateDynamicProfile(args.archetype, args.keywords, seniority);
+      profileSource = `template-fallback (crash)`;
+    }
+  } else if (args.keywords.length || args.seniority || args.jdText) {
+    profileBody = generateDynamicProfile(args.archetype, args.keywords, seniority);
+    profileSource = 'template';
+    console.log(`📝 Template profile (${seniority}/${args.archetype}): "${profileBody.slice(0, 80)}..."`);
+  } else {
+    profileBody = sections.profile;
+    profileSource = 'static-cv.md';
+  }
+  console.log(`🎯 Profile source: ${profileSource}`);
+
+  // A/B tracking: every render appends a row so response-rate by profile
+  // source can be analysed downstream (see cv/qa-outcomes.mjs).
+  try {
+    logProfileSource({
+      company: args.company,
+      role_title: args.roleTitle || null,
+      archetype: args.archetype || null,
+      seniority,
+      lang: args.lang,
+      country: args.country || null,
+      source: profileSource,
+      word_count: profileBody.split(/\s+/).filter(Boolean).length,
+      jd_present: !!args.jdText,
+      renderer: 'generate-pdf-tailored',
+    });
+  } catch { /* logging is best-effort; never fail a render on it */ }
+
+  // ── Market-aware visa tail ──
+  // One market per CV: strip any pre-existing visa/right-to-work sentence,
+  // then append the line for THIS posting's market. Missing --country on an
+  // application render is a caller bug.
+  const market = MT.resolveMarket(args.country, { dachFormat: args.dachFormat, lang: args.lang, requireCountry: false });
+  profileBody = MT.stripVisaSentences(profileBody);
+  const marketVisaLine = MT.visaLine(market, args.lang);
+  if (marketVisaLine) profileBody = `${profileBody} ${marketVisaLine}`;
+  console.log(`🌍 Market tail: ${market}${marketVisaLine ? "" : " (no visa line by design)"}`);
+
+  // 10-second-rule guard: warn when the profile balloons past a scannable
+  // length. Recruiters spend ~10 seconds on the profile before deciding
+  // whether to keep reading.
+  const PROFILE_LINE_WIDTH_CHARS = 130;
+  const PROFILE_SOFT_LINES = 6;
+  const PROFILE_HARD_LINES = 8;
+  const profileEstLines = Math.ceil(profileBody.length / PROFILE_LINE_WIDTH_CHARS);
+  if (profileEstLines > PROFILE_HARD_LINES) {
+    console.error(`\n❌ PROFILE_TOO_LONG: estimated ${profileEstLines} lines (~${profileBody.length} chars) exceeds the ${PROFILE_HARD_LINES}-line hard cap.`);
+    console.error(`   Tighten --profile-text (or the archetype default in generateDynamicProfile) to <=${PROFILE_SOFT_LINES} lines / ~${PROFILE_SOFT_LINES * PROFILE_LINE_WIDTH_CHARS} chars, then retry.`);
+    process.exit(2);
+  }
+  if (profileEstLines > PROFILE_SOFT_LINES) {
+    console.warn(`⚠  Profile ~${profileEstLines} lines (${profileBody.length} chars). Target <=${PROFILE_SOFT_LINES} lines for the 10-second scan; consider tightening.`);
+  }
 
   const reorderedSkills = reorderSkills(sections.skills || "", args.archetype);
-  const reorderedProjects = reorderProjects(sections.projects || "", args.archetype, args.keywords, args.lang);
+  const reorderedProjects = reorderProjects(sections.projects || "", args.archetype, args.keywords, args.lang, args.jdText || "");
+  const reorderedExperience = reorderExperience(sections.experience || "", args.archetype, args.lang);
 
   const labels = args.lang === "de"
     ? {
@@ -452,7 +661,7 @@ async function main() {
   const githubDisp = github.replace(/^https?:\/\//, "");
 
   let headerSubtitle = "";
-  if (args.lang !== "de") {
+  if (args.lang !== "de" && !args.dachFormat) {
     headerSubtitle =
       '<p class="contact">' +
         `${location}` +
@@ -464,10 +673,26 @@ async function main() {
       '</p>';
   }
 
-  // ── Persönliche Daten section (DE only) ──
-  const personalDataBlock = (args.lang === "de" && sections.personal_data)
-    ? `<section class="avoid-break"><h2>${labels.personal_data}</h2>${mdTableToHtml(sections.personal_data)}</section>`
-    : "";
+  // ── Personal Details section ──
+  // DE Lebenslauf: reads from cv-de.md's own table. EN + DACH format:
+  // synthesised from profile.yml so an English CV for a DACH employer
+  // carries the presentation a German-market recruiter expects.
+  let personalDataBlock = "";
+  if (args.lang === "de" && sections.personal_data) {
+    personalDataBlock = `<section class="avoid-break"><h2>${labels.personal_data}</h2>${mdTableToHtml(sections.personal_data)}</section>`;
+  } else if (args.lang === "en" && args.dachFormat) {
+    const pdMd = [
+      "| | |",
+      "|---|---|",
+      `| **Address** | ${location} |`,
+      `| **Email** | ${email} |`,
+      `| **Phone** | ${phone} |`,
+      `| **LinkedIn** | ${linkedinDisp} |`,
+      `| **GitHub** | ${githubDisp} |`,
+      `| **Portfolio** | ${portfolioDisp} |`,
+    ].join("\n");
+    personalDataBlock = `<section class="avoid-break"><h2>${labels.personal_data}</h2>${mdTableToHtml(pdMd)}</section>`;
+  }
 
   // ── Competencies section (only when keywords present) ──
   const competenciesBlock = args.keywords.length
@@ -491,7 +716,7 @@ async function main() {
     SUMMARY_TEXT:            mdToInlineHtml(profileBody),
     COMPETENCIES_BLOCK:      competenciesBlock,
     SECTION_EXPERIENCE:      labels.experience,
-    EXPERIENCE:              experienceBlockToHtml(sections.experience || ""),
+    EXPERIENCE:              experienceBlockToHtml(reorderedExperience),
     SECTION_PROJECTS:        labels.projects,
     PROJECTS:                projectsBlockToHtml(reorderedProjects),
     SECTION_EDUCATION:       labels.education,
@@ -508,6 +733,21 @@ async function main() {
   for (const [key, val] of Object.entries(subs)) {
     html = html.replaceAll(`{{${key}}}`, val);
   }
+
+  // Cross-market drift guard: a DACH/EU CV must never carry the UK visa
+  // story, a UK CV must never carry the Blue Card story. Throws → exit 1.
+  MT.assertNoCrossMarketLeak(html, market, `${args.company} (${args.lang})`);
+  // Banned-content grep gate: any repo-configured banned phrases (see
+  // market-tail.cjs). Throws → exit 1.
+  MT.assertNoBannedContent(html, `${args.company} (${args.lang})`);
+  // Profile-metric ban: named model-quality metrics, percentages, count-plus
+  // phrases, and decimal scores must not appear in the Profile section.
+  // Metrics live in Experience and Projects. Throws → exit 1.
+  MT.assertNoProfileMetrics(html, `${args.company} (${args.lang})`);
+  // Profile-history ban: dates, employer names, universities, and
+  // non-target-country references must not appear in the Profile section.
+  // Throws → exit 1.
+  MT.assertNoProfileHistory(html, `${args.company} (${args.lang})`);
 
   const slug = args.company.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const namePart = name.replace(/\s+/g, '_');
@@ -559,6 +799,8 @@ async function main() {
     lang:             args.lang,
     photo_embedded:   args.includePhoto,
     is_dach_country:  args.isDachCountry,
+    dach_format:      args.dachFormat,
+    market:           market,
     page_count:       pageCount,
     max_pages:        args.maxPages,
   };
