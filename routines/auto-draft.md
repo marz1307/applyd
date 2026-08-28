@@ -8,13 +8,16 @@ Your agent's headless CLI, scheduled via Windows Task Scheduler. Runs weekdays a
 
 ## Goal
 
-For every row in **Stage `2. Triaged`** in the Notion Applications DB with `Match score ≥ triage.score_floor` (default 75) that does NOT already have a Resume + Cover Letter attached, generate the tailored CV PDF + cover letter draft, attach them, and transition to `3. Drafted`. By the next morning's apply window, the candidate sees a queue of ready-to-send applications.
+For every row in **Stage `2. Triaged`** in the Notion Applications DB that does NOT already have a Resume + Cover Letter attached, generate the tailored CV PDF + cover letter draft, attach them, and transition to `3. Drafted`. By the next morning's apply window, the candidate sees a queue of ready-to-send applications.
+
+**Do NOT re-apply the score floor here.** Reaching `2. Triaged` IS the triage decision, made by auto-eval against `triage.score_floor` AND the bounded recruiter-sim override (`triage.override_floor`). Re-testing the score at draft time second-guesses that decision and, worse, silently strands every sim-promoted row: it can never be drafted and never leaves Stage 2. Draft what is at Stage 2.
 
 ## Config (read from `config/profile.yml`)
 
 - `notion.applications_data_source_id`
-- `triage.score_floor` — defaults to 75.
-- `triage.max_drafts_per_run` — hard cap (default 20).
+- `triage.score_floor` — read for reporting only, defaults to 80.
+- `triage.override_floor` — read for reporting only, informs which rows reached Stage 2 via the sim override.
+- `triage.max_drafts_per_run` — per-SESSION chunk (default 7). Small session chunks keep `claude -p` context small; the drain-loop wrapper (`routines/drain-routine.ps1`) re-fires a fresh session per iteration until the target-stage backlog hits 0, so daily throughput is unchanged. The checkpoint is the Stage transition itself.
 - `apply.channel_preference` — informs which channels to flag for follow-up.
 
 ## Pre-flight checks
@@ -37,9 +40,9 @@ For every row in **Stage `2. Triaged`** in the Notion Applications DB with `Matc
 
 1. **Enumerate the full draft queue via the REST helper:**
    ```
-   node scripts/notion/notion-query.mjs --stage "2. Triaged" --min-score 75 --sentinel-missing --json > data/.routine-tmp/draft-queue.json
+   node scripts/notion/notion-query.mjs --stage "2. Triaged" --sentinel-missing --json > data/.routine-tmp/draft-queue.json
    ```
-   The `--sentinel-missing` flag returns only rows whose `Fit notes` do NOT yet contain `[auto-draft` — i.e. rows that need drafting. The script uses the official Notion REST API with proper filter + pagination (the `notion-search` MCP tool's 25-result cap previously prevented full queue enumeration). Sort the result by `match_score` DESC (highest-fit drafted first), cap at `triage.max_drafts_per_run`. If `NOTION_TOKEN` is missing, abort with `ROUTINE_ABORT: NOTION_TOKEN missing — operator needs to provision integration token`.
+   The `--sentinel-missing` flag returns only rows whose `Fit notes` do NOT yet contain `[auto-draft` — i.e. rows that need drafting. The script uses the official Notion REST API with proper filter + pagination (the `notion-search` MCP tool's 25-result cap previously prevented full queue enumeration). Sort the result by `match_score` DESC (highest-fit drafted first), cap at `triage.max_drafts_per_run`. If `NOTION_TOKEN` is missing, abort with `ROUTINE_ABORT: NOTION_TOKEN missing — operator needs to provision integration token`. NOTE: no `--min-score` filter — the score gate was already applied by auto-eval; re-applying it here strands sim-override promotions permanently.
 
 2. **For each row:**
 
@@ -157,7 +160,7 @@ For every row in **Stage `2. Triaged`** in the Notion Applications DB with `Matc
    - Predicted 30-second-scan verdict (Section 5): INVITE or MAYBE → proceed; REJECT → write `[auto-draft] PREDICTED_REJECT: {reason}` to Fit notes and mark Stage 4-blocked.
    - Log honest interview-conversion probability per Section 7 in Fit notes.
 
-   **2h. Generate the cover letter / Anschreiben through the deterministic pipeline, then enrich the content. Free-form LLM drafting of the whole letter is FORBIDDEN (reinstated 2026-07-03 — the July LLM-direct letters lost the DIN envelope, the company address, and all company knowledge; the 2026-06-26 EvoLogics Anschreiben is the reference standard for what this step must produce).**
+   **2h. Generate the cover letter / Anschreiben through the deterministic pipeline, then enrich the content. Free-form LLM drafting of the whole letter is FORBIDDEN — LLM-direct letters lose the DIN envelope, the company address, and all company-specific knowledge. The reference standard for what this step must produce: a DIN-format Anschreiben whose opener leads with a domain truth relevant to the employer's product area, snapped to named company specifics (product / system / founding date), and closes with a specific capability claim tied to the candidate's real experience.**
 
    **2h-1. STRUCTURE — run the pipeline first:**
    ```
@@ -168,7 +171,7 @@ For every row in **Stage `2. Triaged`** in the Notion Applications DB with `Matc
    - If the brief reports `company_address` null, do ONE targeted lookup (company Impressum / contact page via WebFetch or BD) and write the address fields into the brief JSON (`cover-letters/briefs/{NUM}-*.json`), then re-run generate.js. Only ship an address-less recipient block when both attempts fail.
 
    **2h-2. CONTENT — enrich ¶1 and ¶3 (the icing on the cake):**
-   Read the brief JSON. If it holds fewer than 2 high-confidence company facts beyond `tech_stack`, research the company (site, blog, recent news) and add facts to the brief. Then rewrite ONLY the opener (¶1) and the company-interest paragraph (¶3) of the generated `.md` so that a recruiter can tell the candidate knows: **what the company actually does** (product, domain, named systems), **why they are plausibly hiring for this role now** (growth, new platform, data-team buildout, regulatory pressure), and where possible **a recent concrete challenge or milestone** his work addresses. The EvoLogics opener is the bar: a domain truth ("autonomous underwater systems only yield reliable insights when the data layer beneath is dependable"), snapped to named company specifics (S2C acoustic comms, Quadroin AUV, founded 2000), snapped to his capability ("Genau diese Ebene baue ich"). Facts must be verifiable and sourced from the brief — never invented. Do NOT touch the envelope, subject line, ¶4 (availability/salary), or the closer. After editing, re-render (`md-to-pdf.mjs`) and re-upload.
+   Read the brief JSON. If it holds fewer than 2 high-confidence company facts beyond `tech_stack`, research the company (site, blog, recent news) and add facts to the brief. Then rewrite ONLY the opener (¶1) and the company-interest paragraph (¶3) of the generated `.md` so that a recruiter can tell the candidate knows: **what the company actually does** (product, domain, named systems), **why they are plausibly hiring for this role now** (growth, new platform, data-team buildout, regulatory pressure), and where possible **a recent concrete challenge or milestone** the candidate's work addresses. The bar for the opener: a domain truth about the employer's product area, snapped to named company specifics (product / platform / founding date), snapped to a specific capability claim ("this is exactly what I build"). Facts must be verifiable and sourced from the brief — never invented. Do NOT touch the envelope, subject line, ¶4 (availability/salary), or the closer. After editing, re-render (`md-to-pdf.mjs`) and re-upload.
    - For DE JDs the body follows `cv-quality-rules.md` §9.9 (Sie-form, 250–350 words, German number formatting, 0 em/en-dashes); run the §9.10 self-check before saving.
    - For EN JDs: 180–280 words, plain paragraphs, opens with role + company name.
    - **GROUNDING RULE (HARD, added 2026-07-03 after a shipped letter claimed daily Microsoft Fabric use that the attached CV cannot support):** every first-person experience claim ("I work with X", "ich arbeite mit X", "X ist mir vertraut") MUST name only tools/methods present in `cv.md` or `article-digest.md`. JD tools OUTSIDE that evidence base get transfer framing instead — "your X setup maps onto my dbt/Kimball layered practice" — or an honest gap disclosure. A recruiter reads letter and CV side by side; one unsupported claim poisons every true one.
@@ -272,7 +275,7 @@ For every row in **Stage `2. Triaged`** in the Notion Applications DB with `Matc
 --- ROUTINE_CONTRACT ---
 ROUTINE: auto-draft
 TIMESTAMP_UTC: {iso}
-QUEUE_DEPTH: {n}                       # Stage-2 score≥75 rows before this run
+QUEUE_DEPTH: {n}                       # Stage-2 sentinel-missing rows before this run
 DRAFTED: {n}                           # rows successfully drafted
 RESUME_WRITER_INVOCATIONS: {n}         # how many tailored CV-md files written to output/cv-tailored/
 PDF_GENERATED: {n}
