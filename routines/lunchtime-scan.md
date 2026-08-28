@@ -1,5 +1,9 @@
 # Routine: Lunchtime Chrome / Bright Data Scan (12:30 UK weekdays)
 
+**RETIRED as a scheduled routine.** `bd-bulk-scan.mjs` (see `routines/bd-bulk-scan.md`) now covers this routine's whole portal territory (LinkedIn, Xing, Stepstone, Indeed, eFinancialCareers, WTTJ, plus additional SERP-driven portals) at higher volume and with the Bright Data unlocker's own retry / rotation. Keeping two scanners hitting the same portals from the same house IP wastes credit-budget and multiplies IP-block risk. Handshake was the one portal only this routine covered — login-gated and low-yield, so we accept the coverage gap; implement it in `bd-bulk-scan.mjs` if it ever matters.
+
+The file is kept as reference for the chrome-scan mechanics (portal-tier table, dedup rule, Notion-write mapping) — those are still valid when running interactively via `modes/chrome-scan.md`. Do NOT schedule this routine in Task Scheduler alongside `bd-bulk-scan`.
+
 You are running under a **headless agent CLI** (default: `claude -p`; alternatives: `codex exec`, `gemini -p`, …; dispatched by `routines/run-routine.ps1` via an adapter under `routines/adapters/`). No human is available to clarify or approve mid-run. Complete the routine in one pass and exit cleanly. Do NOT ask the user any questions. Do NOT prompt for confirmation. Do NOT pause and wait.
 
 ## Owner
