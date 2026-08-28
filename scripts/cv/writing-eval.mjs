@@ -90,8 +90,17 @@ function findCvHtml(num) {
 
 function findClMd(num) {
   if (!existsSync(CL_DIR)) return null;
-  const files = readdirSync(CL_DIR).filter(f => f.endsWith('.md') && numPrefixed(f, num)).sort();
-  return files.length ? join(CL_DIR, files[files.length - 1]) : null;
+  // Pick by DATE in the filename, not alphabetical. Filenames follow
+  // `APP-NNN-<slug>-YYYY-MM-DD.md`; alphabetical sort ordered by slug first
+  // and could pick an older letter for the same app id when a re-draft
+  // landed under a different slug. The date-in-name sort is deterministic
+  // regardless of slug drift.
+  const DATE_RE = /-(\d{4}-\d{2}-\d{2})\.md$/;
+  const files = readdirSync(CL_DIR)
+    .filter(f => f.endsWith('.md') && numPrefixed(f, num))
+    .map(f => ({ f, date: (f.match(DATE_RE) || [null, ''])[1] }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  return files.length ? join(CL_DIR, files[files.length - 1].f) : null;
 }
 
 function main() {
@@ -132,6 +141,18 @@ function main() {
         for (const sec of ['Experience|Berufserfahrung', 'Education|Ausbildung', 'Skills|Kenntnisse']) {
           const re = new RegExp(sec, 'i');
           if (!re.test(html)) add(r.application_id, 'CV_HALFGEN', `missing section ~/${sec}/ in ${base}`);
+        }
+        // Em dashes (—, U+2014) read as AI-generated and are banned in the CV
+        // body too, not only the letter. Same rule as CL_EM_DASH.
+        // extractVisibleText not available here — scan the rendered text only
+        // by stripping tags first so a CSS `content: "—"` wouldn't false-fire.
+        const visible = html.replace(/<script[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[\s\S]*?<\/style>/gi, '')
+          .replace(/<[^>]+>/g, ' ');
+        if (/—/.test(visible)) {
+          const idx = visible.search(/—/);
+          const ctx = visible.slice(Math.max(0, idx - 30), Math.min(visible.length, idx + 30)).replace(/\s+/g, ' ').trim();
+          add(r.application_id, 'CV_EM_DASH', `em dash (—) in CV body: "...${ctx}..."`);
         }
       }
       if (expectGerman(r.country, r.language) && !cvIsDe) {
