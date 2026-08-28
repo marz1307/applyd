@@ -1,0 +1,36 @@
+# NDA SAFE / BLOCKED list — data-driven source for cv-qa's Check B.
+#
+# Copy to config/nda-safe-list.yml and populate one entry per prior employer
+# whose engagement fell under an NDA. Each entry lists SAFE items (things you
+# ARE allowed to say), BLOCKED items (things you MUST NOT say), and audit
+# prompts (questions cv-qa asks itself to catch a violation).
+#
+# Loaded by scripts/cv/nda-safe-list.mjs, which formats each entry into the
+# cv-qa Check B rubric at prompt-build time. If this file is missing or
+# malformed, cv-qa falls back to the prose in modes/candidate-profile.md
+# Section 5 (which stays as a read-only snapshot for humans).
+
+employers:
+  - name: <PRIOR_EMPLOYER>
+    description: "one-line generic company description you are allowed to give"
+    portfolio_note: "e.g. 'Public portfolio describes this engagement as a Confidential, sanitised case study.'"
+    audit_prompts:
+      - "Does any sentence reveal what the customers are called or what industry they are in beyond generic stakeholder types?"
+      - "Does any sentence give the company's own revenue, growth, or customer-count figures?"
+      - "Does any sentence name a specific internal table, column, or product feature?"
+      - "If a company lawyer read this paragraph, could it embarrass the company by revealing confidential operational details?"
+    safe:
+      # Generic role framing you may repeat freely.
+      - "<GENERIC_ROLE_DESCRIPTION>"
+      - "<GENERIC_STAKEHOLDER_TYPES>"
+      - "<APPROVED_METRIC_1>"
+      - "<APPROVED_METRIC_2>"
+    blocked:
+      - description: "Customer names or specific industries served"
+        detail: "Beyond the generic descriptor above, never name a client or vertical."
+      - description: "Internal financial figures"
+        detail: "Revenue, growth %, customer count, ARR — all off-limits."
+      - description: "Specific internal system names, table/column names, or feature codenames"
+        detail: "Refer to generic categories only (\"warehouse\", \"orchestration layer\")."
+
+  # Add further employers below by copying the block above.
