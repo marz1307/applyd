@@ -17,7 +17,7 @@ When the candidate gets a recruiter response, the prep pack is already waiting.
 ## Config (read from `config/profile.yml`)
 
 - `notion.applications_database_id`
-- `triage.score_floor` — info-only, prep runs at any score that reached Stage 5+.
+- `triage.score_floor` — info-only, prep runs at any score that reached the trigger stage. The score gate was already applied upstream in auto-eval; do not re-apply it here.
 - `candidate.*`, `narrative.*`, `target_roles.*`, `compensation.*` — used in prep generation.
 
 ## Pre-flight

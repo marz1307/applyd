@@ -2,7 +2,7 @@
 
 Interactive mode for when the candidate is filling out an application form in Chrome. It reads what is on the screen, loads the previous context of the job, and generates personalized responses for each form question.
 
-**Fit judgment is upstream.** Rows reaching this mode are already at Stage `3. Drafted` in Notion, meaning `modes/oferta.md` scored them ≥ `triage.score_floor` (default 70/100) and `modes/pdf.md` generated the tailored CV + cover letter. Do NOT re-evaluate the role's fit at apply time — that's stale work. Pull the existing Resume file and Cover letter from Notion; use them. If the user wants to bail on a Stage 3 row, set `Stage = Not pursuing` with reason in `Fit notes`. Do NOT downgrade to Stage 2.
+**Fit judgment is upstream.** Rows reaching this mode are already at Stage `3. Drafted` in Notion, meaning `routines/auto-eval.md` scored them ≥ `triage.score_floor` (default 80/100) and `routines/auto-draft.md` generated the tailored CV + cover letter. Do NOT re-evaluate the role's fit at apply time — that's stale work. Pull the existing Resume file and Cover letter from Notion; use them. If the user wants to bail on a Stage 3 row, set `Stage = Not pursuing` with reason in `Fit notes`. Do NOT downgrade to Stage 2.
 
 ## Requirements
 

@@ -126,7 +126,9 @@ The primary write target for everything applyd produces.
 
 | Parameter | Default | Where to override |
 |-----------|---------|-------------------|
-| **Hard score floor** | Match score ≥ 70 surfaces for drafting. Below → `Not pursuing`. | `config/profile.yml → triage.score_floor` |
+| **Hard score floor** | Match score ≥ `triage.score_floor` (default 80) surfaces for drafting. Below the floor → auto-archived (`trash_below_floor: true`), no human triage. | `config/profile.yml → triage.score_floor` |
+| **Override floor** | Recruiter-sim INVITE may promote a sub-floor row, but NEVER below `triage.override_floor` (default a few points under `score_floor`). Bounds the qualitative override; without it a sim-happy run can smuggle 60-something rows into Stage 2. | `config/profile.yml → triage.override_floor` |
+| **Cleanup floor** | Retrospective floor used by `scripts/notion/notion-cleanup.mjs` ONLY. Set equal to `score_floor` to drop grandfathering; set lower to leave older-rule rows to drain naturally. Rows already past Stage 3 are protected by the stage guard. | `config/profile.yml → triage.cleanup_floor` |
 | **Priority** | Match score DESC end to end. | implicit |
 | **Daily draft quota** | Top 35 / day | `config/profile.yml → triage.max_drafts_per_run` |
 | **Pace alarm threshold** | If apply pace < threshold for N consecutive days, alarm | `config/profile.yml → pace.*` |

@@ -8,12 +8,13 @@ Your agent's headless CLI, scheduled via Windows Task Scheduler. Runs weekdays a
 
 ## Goal
 
-Take everything in **Stage `1. Discovered`** in the Notion Applications DB and run an A–G evaluation (`modes/oferta.md`) for each, scoring on 0–100. Transition to `2. Triaged` if Match score ≥ 75, else `Not pursuing`. This replaces the human-driven evaluate-each-URL step in Cowork.
+Take everything in **Stage `1. Discovered`** in the Notion Applications DB and run an A–G evaluation (`modes/oferta.md`) for each, scoring on 0–100. Transition to `2. Triaged` if Match score ≥ `triage.score_floor` (default 80). Otherwise archive the row (`trash_below_floor: true` semantic — Notion `archived: true`) rather than moving it to `Not pursuing`; the DB then only holds candidates worth drafting. This replaces the human-driven evaluate-each-URL step in Cowork.
 
 ## Config (read from `config/profile.yml`)
 
 - `notion.applications_data_source_id` — Applications DB UUID.
-- `triage.score_floor` — defaults to 75. Surface in Fit notes if you used a different value.
+- `triage.score_floor` — defaults to 80. Surface in Fit notes if you used a different value.
+- `triage.override_floor` — defaults to a few points below `score_floor`. The recruiter-sim INVITE override MAY promote a sub-floor row into `2. Triaged` on qualitative signals (sponsor-license window, visa-clock urgency, unmistakable tier-1 fit) — but NEVER below `override_floor`. Enforce this deterministically in the eval-write step; do not trust prompt discipline alone.
 - `triage.max_evaluations_per_run` — hard cap; do NOT exceed.
 
 If `config/profile.yml` is missing, log `ROUTINE_ABORT: config/profile.yml missing` and exit non-zero.
@@ -53,8 +54,8 @@ If `config/profile.yml` is missing, log `ROUTINE_ABORT: config/profile.yml missi
    - Compute a 1–5 global score per the rubric, then `Match score = round(global * 20)`.
 
    - **Then run an inline recruiter-sim using the rules in `modes/cv-quality-rules.md` Section 5** (no IDE skill dependency under headless `claude -p`). Apply the INVITE/MAYBE/REJECT predictors against the JD + the profile's CV. The verdict is stored as the row's `Recruiter-sim verdict` (Notion select field). Compare against the A-G score:
-     - If A-G ≥ 75 AND recruiter-sim = `REJECT` → demote to `Not pursuing` and prepend `⚠ Recruiter-sim REJECT despite global ≥ 75 ({reason})` to Fit notes. This catches the "looks good on paper but hidden filter would block it" case (visa, seniority, location subtlety).
-     - If A-G < 75 AND recruiter-sim = `INVITE` → promote to `2. Triaged` anyway. Recruiter intuition beats the rubric in this case.
+     - If A-G ≥ `score_floor` AND recruiter-sim = `REJECT` → demote to `Not pursuing` and prepend `⚠ Recruiter-sim REJECT despite global ≥ 75 ({reason})` to Fit notes. This catches the "looks good on paper but hidden filter would block it" case (visa, seniority, location subtlety).
+     - If A-G < `score_floor` AND recruiter-sim = `INVITE` → promote to `2. Triaged` anyway. Recruiter intuition beats the rubric in this case.
      - Otherwise → use A-G score for the Stage transition decision.
 
    - Write to Notion via the deterministic writer **`node scripts/notion/notion-eval-write.mjs`** — the single tested write path (mirrors `notion-draft-write.mjs`; handles Match score + Recruiter-sim verdict + Fit notes + Agent run ID + Stage transition + below-floor archive in one call). Do NOT hand-roll inline `notion-update-page`/REST writes — they drift from the script. Compute the values below, then invoke it once per row (see the invocation block at the end of this step):
@@ -72,8 +73,8 @@ If `config/profile.yml` is missing, log `ROUTINE_ABORT: config/profile.yml missi
        - `wrong_geo` — country/work-authorisation makes the role impractical (US, India, SG, hard-relocation)
        - `seniority_mismatch` — OVER-level only: Senior/Staff/Principal/Manager/Director. **Graduate/Trainee/Junior data-or-AI roles are IN scope (candidate is open to entry-level bands that fit) — do NOT demote these.** Only demote Intern/Werkstudent/Apprentice student placements with no graduate-hire path.
        - `language_gate` — C1+ German required, candidate is B1 → B2
-       - `low_score` — A-G < 75 AND recruiter-sim ≠ INVITE
-       - `recruiter_sim_reject` — A-G ≥ 75 but recruiter-sim returns REJECT
+       - `low_score` — A-G < `score_floor` AND recruiter-sim ≠ INVITE
+       - `recruiter_sim_reject` — A-G ≥ `score_floor` but recruiter-sim returns REJECT
        - `duplicate` — already in Stage 2+ for same company+city
        - `dead_company` — known stale / shell / agency-only listing
        Examples:

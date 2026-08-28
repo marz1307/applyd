@@ -171,7 +171,7 @@ This matches the employer against the local copy of the gov.uk Register of licen
 | `uk-sponsor-route-mismatch` | On register but **not** for Skilled Worker (e.g. only Temporary Worker / GBM) | Licence won't cover a Skilled Worker hire. Treat as a visa risk; tag `uk-sponsor-route-mismatch` and flag in Block G. |
 | `uk-no-sponsor-licence` | Not found (`match` none/low) | Employer likely **cannot sponsor** — treat as the first red flag and **deprioritise** (do not auto-skip unless the candidate has said so). Tag `uk-no-sponsor-licence`. |
 
-On a `medium`/`low` match, eyeball the `best`/`candidates` names — a wrong fuzzy hit on a same-named different entity is possible. The register is a point-in-time snapshot (filename carries the date, echoed in `registerSource`); if it's stale or the index is missing, see `data/uk-sponsor-register/README.md` (download the CSV, then `node scripts/scan/sponsor-check.mjs --rebuild`).
+**Eyeball `best.name` on EVERY match, not just medium/low.** Fuzzy resolution can pick the wrong legal entity even at `match: high` — a franchisee, subsidiary, or same-name-different-industry can outscore the real parent. Read the returned `best.name` before writing any `uk-sponsor-*` tag. The register is a point-in-time snapshot (filename carries the date, echoed in `registerSource`); if it's stale or the index is missing, see `data/uk-sponsor-register/README.md` (download the CSV, then `node scripts/scan/sponsor-check.mjs --rebuild`).
 
 If `work_eligibility.needs_uk_sponsorship` is false (or the role isn't UK-based), skip this check entirely.
 
@@ -343,7 +343,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 ### 2. Record in Notion (system of record) + applications.md (local cache)
 
-**READ `modes/notion-tracker.md` FIRST.** It has the DB IDs, schema, field mappings, stage transitions, and the hard 75-score floor.
+**READ `modes/notion-tracker.md` FIRST.** It has the DB IDs, schema, field mappings, stage transitions, and the hard 80-score floor.
 
 **Step 2a — Notion write (PRIMARY).**
 
