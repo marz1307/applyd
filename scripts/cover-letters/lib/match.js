@@ -43,25 +43,93 @@ const ANGLE_KEYWORDS = {
   ],
 };
 
+// Analyst-shaped experience. Without this catalogue an analyst posting would
+// still get scored on engineering angles and every letter opened on warehouse
+// modelling regardless of the actual role.
+const ANALYST_ANGLE_KEYWORDS = {
+  analyst_reporting: [
+    ['power bi', 3], ['tableau', 3], ['looker', 3], ['dashboard', 3], ['sigma', 2],
+    ['reporting', 2], ['visualisation', 2], ['visualization', 2], ['self-serve', 2],
+    ['stakeholder', 2], ['business intelligence', 2], ['insight', 1],
+  ],
+  analyst_crm_quality: [
+    ['crm', 3], ['salesforce', 3], ['hubspot', 3], ['customer data', 2],
+    ['conversion', 2], ['funnel', 2], ['retention', 2], ['lifecycle', 2],
+    ['segmentation', 2], ['campaign', 1], ['marketing', 1],
+  ],
+  analyst_portfolio: [
+    ['portfolio', 3], ['lending', 3], ['loan', 3], ['credit', 3], ['risk', 2],
+    ['financial services', 2], ['banking', 2], ['billing', 2], ['forecast', 1],
+  ],
+  analyst_governance: [
+    ['governance', 3], ['data quality', 2], ['audit', 2], ['compliance', 2],
+    ['process improvement', 2], ['controls', 2], ['accuracy', 1], ['turnaround', 1],
+  ],
+};
+
+// Which angles an archetype is ALLOWED to open on. A Data Analyst letter that
+// opens on warehouse architecture answers a question the posting did not ask;
+// a Data Engineer letter that opens on Power BI undersells. `ds` and `master`
+// draw on both because those postings genuinely span the two.
+const ARCHETYPE_ANGLES = {
+  da: ['analyst_reporting', 'analyst_crm_quality', 'analyst_portfolio', 'analyst_governance', 'data_quality', 'modelling'],
+  bi: ['analyst_reporting', 'analyst_governance', 'analyst_portfolio', 'modelling', 'data_quality'],
+  ae: ['modelling', 'data_quality', 'infrastructure', 'attribution', 'internal_product', 'sole_owner', 'analyst_reporting'],
+  de: ['infrastructure', 'modelling', 'data_quality', 'sole_owner', 'internal_product', 'attribution'],
+  ds: ['analyst_crm_quality', 'attribution', 'internal_product', 'analyst_portfolio', 'modelling', 'data_quality'],
+  me: ['internal_product', 'infrastructure', 'sole_owner', 'modelling', 'data_quality'],
+};
+
+// ── Certifications ───────────────────────────────────────────────────
+// A cert earns a mention only when the JD asks for the thing it certifies,
+// which is why each entry carries its own trigger terms rather than a generic
+// list. `inProgress` is rendered explicitly. Claiming a cert not yet held is a
+// factual overclaim, and the honest phrasing costs four words.
+//
+// This catalogue is a placeholder — replace with certifications the candidate
+// actually holds, keyed by the JD terms that make them relevant.
+const CERTIFICATIONS = [
+  // Example entries — swap for real ones or leave empty.
+  // { id: 'bigquery_ml', terms: ['bigquery', 'google cloud', 'gcp', 'vertex ai', 'looker studio'],
+  //   en: 'Engineer Data for Predictive Modeling with BigQuery ML (Google Cloud)',
+  //   de: 'Engineer Data for Predictive Modeling with BigQuery ML (Google Cloud)' },
+];
+
+// Return at most `limit` certifications the JD actually asks about, most
+// specific first. Word-boundary matched for the same reason gap detection is:
+// `includes('dbt')` is safe, `includes('r')` is not, so never loosen this.
+function pickCertifications(jdText, limit = 2) {
+  const t = String(jdText || '').toLowerCase();
+  const hit = (term) => new RegExp('(^|[^a-z0-9])' + escapeRe(term) + '([^a-z0-9]|$)').test(t);
+  return CERTIFICATIONS.filter((c) => c.terms.some(hit)).slice(0, limit);
+}
+
 function pickAngle(jdText, brief, opts = {}) {
   const jd = (jdText || '').toLowerCase();
   const factText = brief ? (brief.facts || []).map(f => f.fact).join(' ').toLowerCase() : '';
   const t = jd + ' ' + factText;
   const scores = {};
-  for (const [angle, weighted] of Object.entries(ANGLE_KEYWORDS)) {
+  const ALL_ANGLE_KEYWORDS = { ...ANGLE_KEYWORDS, ...ANALYST_ANGLE_KEYWORDS };
+  for (const [angle, weighted] of Object.entries(ALL_ANGLE_KEYWORDS)) {
     let s = 0;
     for (const [term, weight] of weighted) if (t.includes(term)) s += weight;
     scores[angle] = s;
   }
   // Tie-break prefers specificity. Modelling is the safe fallback last.
-  const order = ['internal_product', 'attribution', 'infrastructure', 'data_quality', 'modelling', 'sole_owner'];
+  // Candidate set is archetype-scoped, and its ORDER is the tie-break: most
+  // role-appropriate first. Falls back to a generic order for an unknown
+  // archetype rather than picking something a stranger role cannot use.
+  const archetype = String(opts.archetype || '').toLowerCase();
+  const order = ARCHETYPE_ANGLES[archetype]
+    || ['internal_product', 'attribution', 'infrastructure', 'data_quality', 'modelling', 'sole_owner'];
+  const fallbackAngle = order[order.length - 1];
   // Cross-batch variety: a counts map of already-used angles can be passed via
   // opts.usedAngles. If the top angle has been used heavily already and a
   // second-place angle is within 1 point of it, prefer the rarer angle.
   const used = opts.usedAngles || {};
   let best = order[0], bestScore = scores[order[0]];
   for (const a of order) if (scores[a] > bestScore) { best = a; bestScore = scores[a]; }
-  if (bestScore === 0) best = 'modelling';
+  if (bestScore === 0) best = fallbackAngle;
   // Variety tiebreaker: if a runner-up is within 1 of the leader AND the
   // leader has been used noticeably more (≥2 more), pick the runner-up.
   const runnersUp = order.filter(a => a !== best && scores[a] >= bestScore - 1);
@@ -71,41 +139,144 @@ function pickAngle(jdText, brief, opts = {}) {
   return { angle: best, score: bestScore, all_scores: scores };
 }
 
+// ── Term matching ──────────────────────────────────────────────────
+// NEVER substring-match a tech term against JD text. `includes('scala')`
+// matched "SCALAble analytical infrastructure" and `includes('rust')` matched
+// "roBUSTness", so letters previously disclosed Scala/Rust gaps against
+// postings that never named either language. A wrongly-invented gap is worse
+// than a missed one: it volunteers a weakness the employer never asked about.
+// So matching is word-boundary by default and stricter for ambiguous short
+// names.
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Ambiguous names that are also common words/letters. Case-sensitive, and the
+// surrounding line must look like a tech context, not prose ("Go beyond the
+// numbers", "R&D" must not match).
+const AMBIGUOUS_TERMS = {
+  'go': (text) => /(^|[\s,(/])(Golang|Go)(?=[\s,)/.;:]|$)/.test(text)
+    && /(programming|language|experience (in|with)|proficien|knowledge of|written in|stack|developer|golang|\b(python|java|scala|rust|kotlin|typescript)\b)/i.test(text),
+  'r': (text) => /(^|[\s,(/])R(?=[\s,)/.;:]|$)/.test(text)
+    && /(programming|language|statistic|\b(python|sas|spss|stata|matlab|julia)\b)/i.test(text),
+};
+function termHit(term, text) {
+  const key = term.trim().toLowerCase();
+  if (AMBIGUOUS_TERMS[key]) return AMBIGUOUS_TERMS[key](text);
+  const esc = escapeRe(term.trim());
+  // Boundary = anything that is not a letter/digit. `+`/`#`/`.` stay allowed
+  // AFTER the term so "C++"-style names survive if they ever join the lists,
+  // but a letter directly attached (scalaBLE, roBUST, postgreSQL) never hits.
+  return new RegExp(`(^|[^A-Za-z0-9])${esc}($|[^A-Za-z0-9])`, 'i').test(text);
+}
+
+// JD-specificity ranking. Without this, `strong` gets built by walking
+// cvMaster.skills.production in CV-LIST order, so the terms that surface first
+// are whichever the CV happens to list first — never whichever the JD actually
+// cares about. Downstream shipped generic "You are asking for Python, SQL"
+// leads on postings whose distinguishing ask was something else entirely.
+//
+// Rank by how much a term DISTINGUISHES this posting. Two deterministic
+// signals, no corpus scan and no persisted state:
+//   1. commodity terms — listed by every data JD and held by every data CV.
+//      Naming them back to the employer proves nothing.
+//   2. multi-word terms are more specific than single tokens
+//      ("dimensional modelling" outranks "SQL").
+// Commodity terms REMAIN strong matches, because they are genuine matches;
+// they simply sort last, so the sentence leads with what is distinguishing.
+// Sort is stable, so CV order survives as the tie-break within a band.
+const COMMODITY_TERMS = new Set([
+  'sql', 'python', 'excel', 'git', 'github', 'bash', 'linux',
+  'english', 'communication', 'teamwork', 'agile', 'scrum', 'jira',
+]);
+function jdSpecificity(term) {
+  const t = String(term || '').toLowerCase().trim();
+  const distinguishing = COMMODITY_TERMS.has(t) ? 0 : 10;
+  return distinguishing + Math.min(t.split(/\s+/).length, 3);
+}
+
+// ── Portal chrome stripper ───────────────────────────────────────────
+// LinkedIn (and friends) append a related-jobs footer to the advert body:
+// "People also viewed", "Similar jobs", "More searches". Those blocks list
+// OTHER adverts, with OTHER employers' stacks in their titles. When that text
+// reaches scoreMatch it is indistinguishable from a requirement, so a word-
+// boundary hit on "Scala" from a neighbouring "Scala Developer" listing
+// becomes a Scala gap disclosed in THIS letter. Word-boundary matching alone
+// cannot help when the text itself does not belong to the advert. Trim, then
+// match.
+//
+// Cut at the EARLIEST high-confidence marker. Each must be portal furniture
+// that no real advert body would contain. Deliberately excludes weaker
+// candidates like "Jobs in" and "Show more", which do appear in genuine copy.
+const PORTAL_CHROME_MARKERS = [
+  /^\s*#{0,4}\s*People also viewed\b/im,
+  /^\s*#{0,4}\s*Similar jobs\b/im,
+  /^\s*#{0,4}\s*More searches\b/im,
+  /\bReferrals increase your chances\b/i,
+  /\bGet notified about new\b/i,
+  /\bSet alert for similar jobs\b/i,
+  /\bExplore collaborative articles\b/i,
+  /^\s*#{0,4}\s*Recommended for you\b/im,
+  /^\s*#{0,4}\s*More jobs from\b/im,
+];
+
+// Never cut inside the first 200 characters. A marker that early means either a
+// bad scrape or a false positive, and truncating to nothing would silently turn
+// a real advert into an empty one — a worse failure than the pollution.
+const MIN_BODY_CHARS = 200;
+
+function stripPortalChrome(text) {
+  const t = String(text || '');
+  let cut = -1;
+  for (const re of PORTAL_CHROME_MARKERS) {
+    const m = re.exec(t);
+    if (m && m.index >= MIN_BODY_CHARS && (cut === -1 || m.index < cut)) cut = m.index;
+  }
+  return cut === -1 ? t : t.slice(0, cut).trimEnd();
+}
+
 // Honest match scoring against the production / skills-list-only / research-only split
 function scoreMatch(jdText, cvMaster) {
-  const t = (jdText || '').toLowerCase();
+  // Strip BEFORE anything reads it: the footer corrupts strong matches and
+  // transferable matches too, not only gaps. One definition, one call site.
+  const raw = stripPortalChrome(jdText || '');
   const strong = [], transferable = [], gaps = [];
   const seen = new Set();
   for (const skill of cvMaster.skills.production) {
     const key = skill.toLowerCase();
-    if (t.includes(key) && !seen.has(key)) {
-      strong.push({ jd_term: skill, cv_evidence: 'production experience (see cv.md)' });
+    if (termHit(skill, raw) && !seen.has(key)) {
+      // `commodity` is carried on the match so the composer can tell a
+      // distinguishing overlap from a meaningless one WITHOUT re-deriving the
+      // judgement.
+      strong.push({ jd_term: skill, cv_evidence: 'production experience (see cv.md)', commodity: COMMODITY_TERMS.has(key) });
       seen.add(key);
     }
   }
   for (const skill of cvMaster.skills.skills_list_only) {
     const key = skill.toLowerCase();
-    if (t.includes(key) && !seen.has(key)) {
+    if (termHit(skill, raw) && !seen.has(key)) {
       transferable.push({ jd_term: skill, cv_evidence: 'on skills list (study / personal project)' });
       seen.add(key);
     }
   }
-  // Common "gap" detection: high-frequency JD terms that aren't in any CV bucket
+  // Common "gap" detection: high-frequency JD terms that aren't in any CV bucket.
+  // A gap is only disclosed on a confident, word-boundary hit — see termHit.
   const possibleGaps = [
     { term: 'Kubernetes', context: 'Kubernetes in production' },
     { term: 'Kafka', context: 'Kafka streaming in production' },
     { term: 'Scala', context: 'Scala production codebase' },
-    { term: 'Go ', context: 'Go in production' },
+    { term: 'Go', context: 'Go in production' },
     { term: 'Rust', context: 'Rust in production' },
     { term: 'SageMaker', context: 'AWS SageMaker production deployment' },
     { term: 'Vertex AI', context: 'GCP Vertex AI production deployment' },
     { term: 'Kubeflow', context: 'Kubeflow' },
   ];
   for (const g of possibleGaps) {
-    if (t.includes(g.term.toLowerCase()) && !seen.has(g.term.toLowerCase())) {
+    if (termHit(g.term, raw) && !seen.has(g.term.toLowerCase())) {
       gaps.push({ jd_term: g.term, cv_evidence: 'not in CV', disclose_in_letter: true });
     }
   }
+  // Most-distinguishing first. Everything downstream reads strong_matches[0]
+  // or slices the head of the list, so this single sort fixes both the
+  // "You are asking for …" lead and the contribution anchor at once.
+  strong.sort((a, b) => jdSpecificity(b.jd_term) - jdSpecificity(a.jd_term));
   return { strong_matches: strong, transferable_matches: transferable, gaps };
 }
 
@@ -117,9 +288,9 @@ function salaryRange(roleHint, country, cvMaster, seniority) {
   const r = roleHint || 'ae';
   // Map roleHint to anchor key
   const roleKey = ['ae', 'ds', 'de', 'da', 'me'].includes(r) ? r : 'ae';
-  // Seniority-aware suffix (2026-07-03, exceptional-graduate positioning):
-  // graduate/junior applications must never quote mid bands. Falls back to
-  // the _mid anchor when no junior anchor exists for the geo/role.
+  // Seniority-aware suffix: graduate/junior applications must never quote mid
+  // bands. Falls back to the _mid anchor when no junior anchor exists for the
+  // geo/role.
   const sfx = /junior|graduate|entry|trainee/i.test(String(seniority || '')) ? 'junior' : 'mid';
   let base = null;
   if (/germany|austria|switzerland|de$|^de\b/i.test(c)) base = `de_${roleKey}`;
@@ -150,10 +321,10 @@ function pickFacts(brief) {
 }
 
 function match({ brief, cvMaster, jdText, roleHint, country, appId, usedAngles, seniority }) {
-  const anglePick = pickAngle(jdText, brief, { usedAngles });
+  const anglePick = pickAngle(jdText, brief, { usedAngles, archetype: roleHint || 'ae' });
   const scoring = scoreMatch(jdText, cvMaster);
   // Seniority fallback: detect graduate/junior from the JD title when the
-  // caller didn't pass it (Notion Seniority field is the preferred source).
+  // caller didn't pass it.
   const sen = seniority || (/\b(junior|graduate|entry[- ]level|trainee|werkstudent)\b/i.test(String(brief.job_title || jdText || '').slice(0, 400)) ? 'junior' : '');
   const salary = salaryRange(roleHint, country, cvMaster, sen);
   const factsPicked = pickFacts(brief);
@@ -163,6 +334,8 @@ function match({ brief, cvMaster, jdText, roleHint, country, appId, usedAngles, 
     cv_variant: roleHint || 'ae',
     match_summary: scoring,
     employer_angle: anglePick.angle,
+    experience_angle: anglePick.angle,
+    certifications_to_mention: pickCertifications(jdText),
     employer_angle_scores: anglePick.all_scores,
     company_facts_to_reference: factsPicked.map(f => ({ category: f.category, fact: f.fact, source: f.source })),
     facts_available: (brief.facts || []).length,
@@ -180,4 +353,4 @@ function detectTone(brief) {
 }
 
 // pickEmployerAngle is a legacy alias kept for backward compatibility.
-module.exports = { match, pickAngle, pickEmployerAngle: pickAngle, scoreMatch, salaryRange, pickFacts };
+module.exports = { match, pickAngle, pickEmployerAngle: pickAngle, scoreMatch, salaryRange, pickFacts, pickCertifications, CERTIFICATIONS, stripPortalChrome, termHit };
