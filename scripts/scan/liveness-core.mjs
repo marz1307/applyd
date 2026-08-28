@@ -13,16 +13,34 @@ const HARD_EXPIRED_PATTERNS = [
   /closed on \d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i,
   /closed on (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}/i,
   /diese stelle (ist )?(nicht mehr|bereits) besetzt/i,
+  // Xing's dead-advert page. Observed 2026-08-16 on APP-3804, which was only
+  // caught because Xing happened to also return 410 — the text is the reliable
+  // signal, the status code is not guaranteed.
+  /dieses stellenangebot existiert nicht/i,
   /offre (expirée|n'est plus disponible)/i,
 ];
 
 const LISTING_PAGE_PATTERNS = [
   /\d+\s+jobs?\s+found/i,
   /search for jobs page is loaded/i,
+  // LinkedIn's expired-advert shell. It does NOT say the job is gone — it
+  // silently serves a full search-results page, ~30-38k chars of real content,
+  // which reads as a healthy advert on every length- and apply-text-based check.
+  // APP-4425 (Awaze) and APP-3431 (King) both sat in the pipeline as "alive"
+  // for weeks on 30k+ char bodies. This line only ever appears at the bottom of
+  // a results list, never on a single advert.
+  /you.ve viewed all jobs for this search/i,
 ];
 
 const EXPIRED_URL_PATTERNS = [
   /[?&]error=true/i,
+  // LinkedIn states expiry in the redirect itself and nowhere in the body: an
+  // expired advert 301s to a role-search page carrying `trk=expired_jd_redirect`.
+  // That is the platform's own machine-readable marker, and it is far more
+  // reliable than anything in the rendered text — the page it lands on is a
+  // normal search page with no expiry wording at all. APP-3431 (King) was
+  // classified alive on a 30,705-char body that was exactly this redirect.
+  /[?&]trk=expired_jd_redirect/i,
 ];
 
 const APPLY_PATTERNS = [
@@ -75,4 +93,31 @@ export function classifyLiveness({ status = 0, finalUrl = '', bodyText = '', app
   }
 
   return { result: 'uncertain', code: 'no_apply_control', reason: 'content present but no visible apply control found' };
+}
+
+/**
+ * Codes that justify retiring a row to `Withdrew`.
+ *
+ * Deliberately narrower than `result === 'expired'`. Two of the expired codes
+ * are not evidence a posting is dead, only that the fetcher could not read it:
+ *
+ *   insufficient_content — a bot wall and a dead advert both return a near-empty
+ *     body. eFinancialCareers walls every headless fetcher this way. On
+ *     2026-08-14 a Firecrawl pass proved 154 of 160 rows that headless
+ *     Playwright could not adjudicate were fully live job adverts.
+ *   no_apply_control — measures the detector's blindness to consent walls and
+ *     JS-rendered buttons, not the advert's state. It was 91% of that same run.
+ *
+ * Withdrawing on either would gut a live pipeline. Keep this set hard-signal
+ * only: an HTTP status, an expiry URL, or explicit expiry text.
+ */
+export const WITHDRAWABLE_CODES = Object.freeze([
+  'http_gone',
+  'expired_url',
+  'expired_body',
+  'listing_page',
+]);
+
+export function isWithdrawable(code) {
+  return WITHDRAWABLE_CODES.includes(code);
 }

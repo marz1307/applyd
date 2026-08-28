@@ -29,13 +29,20 @@
  *   node bd-bulk-scan.mjs --max-batch 30           # URLs per BD API call (default 25)
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { execSync, execFileSync } from "node:child_process";
+import { readFileSync, existsSync, mkdirSync } from "node:fs";
+import { execSync, spawn } from "node:child_process";
 import yaml from "js-yaml";
-import { loadTaxonomy, deriveQueries, deriveTitleFilter } from "./role-taxonomy.mjs";
+import { loadTaxonomy, deriveQueries, deriveTitleFilter, matchNegative, translateRole } from "./role-taxonomy.mjs";
+import { windowHours, withRecency, partitionByFreshness, writeWatermark, readWatermark } from "./scan-freshness.mjs";
+import { fetchWithRetry } from "../net-retry.mjs";
+import { createStage1Row, resolveCountry, inferPosition } from "../notion/notion-stage1.mjs";
+// canonicalUrl + the seen-ledger moved here 2026-08-12 so chrome-scan-visible
+// shares one dedup key. Do NOT reimplement canonicalUrl locally — a divergent
+// copy fails silently (0 duplicates reported while re-adding everything).
+import { canonicalUrl, loadSeen, saveSeen, SEEN_PATH } from "../seen-ledger.mjs";
 
 // ─── Firecrawl (self-hosted, no API key) ─────────────────────────────────
-// Firecrawl runs locally at http://localhost:3002 (Docker compose).
+// Firecrawl is expected to run locally at http://localhost:3002 (Docker compose).
 // NO API key required — pass empty Authorization. Override via env if the
 // daemon is moved. Used for Xing because BD's generic scraper returns the
 // unhydrated React shell (0 job URLs). Firecrawl waits for JS render.
@@ -52,12 +59,71 @@ async function firecrawlPing() {
 // Self-heal (added 2026-07-03): scheduled runs found firecrawl down on EVERY
 // run for weeks — Xing + CareerBee were silently skipped. Containers now carry
 // restart=unless-stopped, but if the scan fires before Docker has brought them
-// up, try `docker start` and re-ping before giving up. Harmless when the
-// engine itself is down (docker start just errors) — we fall back to skip.
+// up, try `docker start` and re-ping before giving up.
+//
+// 2026-08-09 — the ENGINE case, which the original note called "harmless" and
+// then skipped. It is the common case, not the edge case. Every CareerOps task
+// runs S4U ("whether user is logged on or not"), but Docker Desktop starts
+// from the HKCU Run key, i.e. only at interactive sign-in. So a scan firing
+// while the operator is signed out finds no Docker daemon at all, and `docker start`
+// cannot help because there is nothing for it to talk to. Observed 2026-08-09:
+// host booted 23:27, Docker Desktop started 00:20:17 at sign-in.
+//
+// So escalate: containers → engine → give up loudly. Note that on Windows the
+// engine lives in a WSL2 VM that needs a user session, so the escalation can
+// still fail when nobody is signed in. That is why the give-up path now emits
+// a machine-greppable marker for the watchdog (see system-eval.mjs) instead of
+// disappearing into a log nobody reads.
 const FIRECRAWL_CONTAINERS = "firecrawl-api-1 firecrawl-playwright-service-1 firecrawl-redis-1 firecrawl-rabbitmq-1 firecrawl-nuq-postgres-1";
+const DOCKER_DESKTOP_EXE = process.env.DOCKER_DESKTOP_EXE
+  || "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe";
+
+function dockerEngineUp() {
+  try { execSync("docker info", { stdio: "pipe", timeout: 20_000 }); return true; }
+  catch { return false; }
+}
+
+// Launch Docker Desktop and wait for the engine to answer. Returns false fast
+// when there is no session to launch into, rather than blocking the whole scan.
+async function startDockerEngine(maxWaitMs = 180_000) {
+  if (dockerEngineUp()) return true;
+  console.error("  firecrawl: docker engine is DOWN — attempting to start Docker Desktop");
+  if (!existsSync(DOCKER_DESKTOP_EXE)) {
+    console.error(`  firecrawl: Docker Desktop not found at ${DOCKER_DESKTOP_EXE}`);
+    return false;
+  }
+  try {
+    // Detached; Docker Desktop brings the engine up itself when its AutoStart
+    // preference is enabled (settings-store.json → AutoStart: true).
+    spawn(DOCKER_DESKTOP_EXE, [], { detached: true, stdio: "ignore" }).unref();
+  } catch (e) {
+    console.error(`  firecrawl: could not launch Docker Desktop (${String(e.message).slice(0, 120)})`);
+    return false;
+  }
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 10_000));
+    if (dockerEngineUp()) {
+      console.error("  firecrawl: docker engine came up");
+      return true;
+    }
+  }
+  console.error(`  firecrawl: docker engine did not come up within ${Math.round(maxWaitMs / 1000)}s`);
+  return false;
+}
+
 async function firecrawlPingWithRecovery() {
   if (await firecrawlPing()) return true;
-  console.error(`  firecrawl: ping failed — attempting docker start (${FIRECRAWL_URL})`);
+  console.error(`  firecrawl: ping failed — attempting recovery (${FIRECRAWL_URL})`);
+
+  // Step 1: engine. Without it, step 2 cannot possibly work.
+  if (!dockerEngineUp() && !(await startDockerEngine())) {
+    console.error("  firecrawl: FIRECRAWL_ENGINE_DOWN — no docker engine (likely signed out; Docker Desktop is sign-in-scoped)");
+    return false;
+  }
+
+  // Step 2: containers. restart=unless-stopped usually handles this once the
+  // engine is up, but an explicit start removes the race.
   try {
     execSync(`docker start ${FIRECRAWL_CONTAINERS}`, { stdio: "pipe", timeout: 60_000 });
   } catch (e) {
@@ -82,7 +148,7 @@ function firecrawlFetch(urls) {
     const safe = url.replace(/[^a-z0-9]/gi, "_").slice(-80);
     const outPath = `data/.tmp/fc-cache/${safe}.md`;
     try {
-      execFileSync('firecrawl', ['scrape', url, '--wait-for', String(FIRECRAWL_WAIT_MS), '--only-main-content', '-o', outPath], {
+      execSync(`firecrawl scrape "${url}" --wait-for ${FIRECRAWL_WAIT_MS} --only-main-content -o "${outPath}"`, {
         stdio: ["ignore", "ignore", "pipe"], timeout: 90_000,
         env: { ...process.env, FIRECRAWL_API_URL: FIRECRAWL_URL },
       });
@@ -94,8 +160,8 @@ function firecrawlFetch(urls) {
   return out;
 }
 
-// Parse a Xing job DETAIL page's HTML for the REAL company + title. Xing
-// exposes stable data-testid anchors on every employer's posting:
+// Parse a Xing job DETAIL page's HTML for the REAL company + title. Xing exposes
+// stable data-testid anchors on every employer's posting (verified 2026-07-13):
 //   job-details-title             → the <h1> holds the true role title
 //   job-details-company-info-name → text is the true company (incl. the staffing
 //                                    agency behind a syndicated multi-city posting)
@@ -103,17 +169,7 @@ function firecrawlFetch(urls) {
 // with nulls when an anchor is absent.
 function parseXingDetail(html) {
   const h = html || "";
-  // Tag strip runs to a fixed point so nested/split tag attacks like
-  // "<sc<script>ript>" fully unwind. Entity decode ordering matters: &amp;
-  // MUST decode last, otherwise "&amp;#x27;" is double-unescaped to "'"
-  // (js/double-escaping). Same pattern the upstream cv-qa.mjs fix uses.
-  const clean = (s) => {
-    if (!s) return "";
-    let out = s;
-    let prev;
-    do { prev = out; out = out.replace(/<[^>]+>/g, " "); } while (out !== prev);
-    return out.replace(/&#x27;/g, "'").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
-  };
+  const clean = (s) => s ? s.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#x27;/g, "'").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim() : "";
   const title = clean((h.match(/data-testid="job-details-title"[\s\S]{0,400}?<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1]);
   const company = clean((h.match(/data-testid="job-details-company-info-name"[^>]*>([\s\S]*?)<\/(?:p|span|a|div)>/i) || [])[1]);
   return { title: title || null, company: company || null };
@@ -126,7 +182,7 @@ function enrichXingDetail(url) {
   const safe = url.replace(/[^a-z0-9]/gi, "_").slice(-80);
   const outPath = `data/.tmp/fc-cache/xd_${safe}.html`;
   try {
-    execFileSync('firecrawl', ['scrape', url, '--html', '--wait-for', String(FIRECRAWL_WAIT_MS), '-o', outPath], {
+    execSync(`firecrawl scrape "${url}" --html --wait-for ${FIRECRAWL_WAIT_MS} -o "${outPath}"`, {
       stdio: ["ignore", "ignore", "pipe"], timeout: 90_000,
       env: { ...process.env, FIRECRAWL_API_URL: FIRECRAWL_URL },
     });
@@ -154,14 +210,24 @@ const PAGES = parseInt(arg("--pages") || "2", 10);
 const MAX_BATCH = parseInt(arg("--max-batch") || "25", 10);
 const JSON_OUT = has("--json");
 
-// --self-test: regression guard for the extraction bugs fixed 2026-07-06 and
-// 2026-07-13 (canonicalUrl query-string job-id, Civil-Service umbrella collapse,
-// SERP-markdown shape, Xing slug drop, sponsoredjobs relative pattern, Xing
-// detail-page parser). Runs before any network dependency so CI can call it
-// token-free.
-// NOTE: selfTest() is invoked AFTER the PORTALS object is defined (below the
-// PORTALS block) so its assertions can call the real portal extractors. The
-// env checks below skip under --self-test so this stays token-free for CI.
+// Freshness (2026-08-02): scan only what was posted since the last successful
+// run. Google-SERP portals get the window as a query operator (no fetch cost
+// for stale results); the rest are filtered on the posted-date they return.
+// Postings with no readable date are KEPT — see scan-freshness.mjs.
+//   --no-freshness   full historical scan (backfills, portal debugging)
+//   --window-hours N override the watermark-derived window
+const NO_FRESHNESS = has("--no-freshness");
+const RUN_STARTED_ISO = new Date().toISOString();
+const WINDOW_HOURS = NO_FRESHNESS
+  ? null
+  : (arg("--window-hours") ? Math.max(1, parseInt(arg("--window-hours"), 10)) : windowHours(RUN_STARTED_ISO));
+
+// --self-test: regression guard for the three extraction bugs fixed 2026-07-06
+// (canonicalUrl query-string job-id, Civil-Service umbrella collapse, SERP-markdown
+// shape). Runs before any env/network dependency so CI can call it token-free.
+// NOTE: selfTest() is invoked AFTER the PORTALS object is defined (see below the
+// PORTALS block), so its assertions can call the real portal extractors. The env
+// checks are made to skip under --self-test so this stays token-free for CI.
 function selfTest() {
   const A = [];
   const ok = (cond, label) => A.push({ label, pass: !!cond });
@@ -173,6 +239,100 @@ function selfTest() {
   ok(canonicalUrl(csA) !== canonicalUrl(csB), "canonicalUrl keeps distinct jcode");
   ok(canonicalUrl("https://de.indeed.com/viewjob?jk=aaa111") !== canonicalUrl("https://de.indeed.com/viewjob?jk=bbb222"), "canonicalUrl keeps distinct jk");
   ok(canonicalUrl("https://x/jobs.cgi?jcode=9&ved=abc") === canonicalUrl("https://x/jobs.cgi?jcode=9&utm=z"), "canonicalUrl ignores non-id params");
+
+  // City scoping (2026-08-14) — `city:` must reach eFC and NOT silently narrow
+  // Stepstone/Xing, which is what made the first cut of this feature cost +10
+  // URLs a run for no measured gain.
+  const qCity = { role: "Data Analyst", country: "Germany", city: "Frankfurt" };
+  ok(cityFor(qCity, "efc") === "Frankfurt", "cityFor: efc honours city by default");
+  ok(cityFor(qCity, "xing") === null, "cityFor: xing ignores city by default");
+  ok(cityFor(qCity, "stepstone") === null, "cityFor: stepstone ignores city by default");
+  ok(cityFor({ ...qCity, city_portals: ["efc", "xing"] }, "xing") === "Frankfurt", "cityFor: city_portals widens scope");
+  ok(cityFor({ role: "X", country: "Germany" }, "efc") === null, "cityFor: no city → null");
+
+  // German query variants (2026-08-18). These assertions are written against the
+  // LIVE config, so they also fail loudly if someone disables the feature or
+  // drops the German names out of role-taxonomy.yml without meaning to.
+  const qDE = { role: "Data Analyst", country: "Germany" };
+  const qUK = { role: "Data Analyst", country: "United Kingdom" };
+  if (DE_VARIANTS_ON) {
+    ok(rolesFor(qDE, "xing").includes("Datenanalyst"), "rolesFor: xing/Germany gains the German term");
+    ok(rolesFor(qDE, "stepstone").includes("Datenanalyst"), "rolesFor: stepstone/Germany gains the German term");
+    // eFC was measured on 2026-08-18 and dropped: its vector search returns a
+    // thin off-target page for German terms (dateningenieur/in-berlin gave 9
+    // cards vs 45-48 for English) and produced zero net-new rows. This asserts
+    // the REMOVAL so a future config edit that re-adds it fails loudly here
+    // rather than quietly restoring a measured-dead query set.
+    ok(rolesFor(qDE, "efc").length === 1, "rolesFor: efc stays English-only (measured dead 2026-08-18)");
+    // The whole point of scoping: non-DACH markets and non-DACH boards must be
+    // untouched, or this silently doubles the bill on portals it cannot help.
+    ok(rolesFor(qUK, "xing").length === 1, "rolesFor: UK market stays English-only");
+    ok(rolesFor(qDE, "linkedin").length === 1, "rolesFor: linkedin stays English-only");
+    // AE has no German posting title; inventing one would spend fetches on a
+    // string no employer writes.
+    ok(rolesFor({ role: "Analytics Engineer", country: "Germany" }, "xing").length === 1,
+       "rolesFor: Analytics Engineer has no German variant");
+    // English role always leads, so an English-only portal behaves identically.
+    ok(rolesFor(qDE, "xing")[0] === "Data Analyst", "rolesFor: English role stays first");
+  } else {
+    ok(rolesFor(qDE, "xing").length === 1, "rolesFor: disabled → English-only");
+  }
+  // An out-of-scope portal must emit exactly what it emits for the plain
+  // country query, so plan()'s dedupe can collapse it to zero added cost.
+  ok(
+    JSON.stringify(PORTALS.xing.urls("Data Analyst", "Germany", 2, null))
+      === JSON.stringify(PORTALS.xing.urls("Data Analyst", "Germany", 2)),
+    "xing city-null path is byte-identical to the country-only path"
+  );
+
+  // Employer-site SERP portal (2026-08-15). The failure this guards against is
+  // silent misattribution: every row it emits names a real tracked employer, so
+  // a loose URL pattern would file someone else's job — or a blog post — under
+  // that company rather than merely dropping it.
+  const empGermany = PORTALS.employers.urls("Data Engineer", "Germany", 1);
+  ok(empGermany.length === 2, "employers: 7 German boards chunk into 2 grouped SERP queries");
+  ok(empGermany.every(u => u.startsWith("https://www.google.com/search")),
+     "employers: emits Google URLs so plan() routes them to the SERP zone");
+  // Read q via searchParams, not decodeURIComponent: URLSearchParams encodes a
+  // space as "+", which decodeURIComponent leaves as a literal plus.
+  ok(empGermany.every(u => (new URL(u).searchParams.get("q") || "").includes(" OR site:")),
+     "employers: domains are OR-ed into one query, not one query per company");
+  ok(PORTALS.employers.urls("Data Engineer", "Ireland", 2).length === 0,
+     "employers: a country with no tracked board costs zero fetches");
+  // Attribution is by URL, never by SERP title.
+  const empJobs = PORTALS.employers.extract(
+    '[Data Engineer (All genders)](https://jobs.zalando.com/en/jobs/2724318-Data-Engineer-(All-genders))\n' +
+    '[Claims Data Scientist in London at Munich Re](https://careers.munichre.com/en/job/london/claims-data-scientist/3342/41711207168)\n' +
+    '[Lead Data Engineer @ Klarna](https://jobs.deel.com/klarna/job-details/846a362f-2e03-4054-91cb-bf8ee87d3f34/overview)\n' +
+    '[How we work at data.works - Meet Sven](https://www.otto.de/jobs/en/blogs/techblog/how-we-work-at-data-works-meet-sven/)\n' +
+    '[Data Engineer at Some Other Firm](https://www.stepstone.de/stellenangebote--Data-Engineer--123456-inline.html)',
+    "", "", "Data Engineer", "Germany");
+  ok(empJobs.length === 3, "employers: extracts the 3 real job pages, drops the blog post and the foreign domain");
+  ok(empJobs.every(j => j.company && j.title), "employers: every row carries a company and a title");
+  const zal = empJobs.find(j => j.company === "Zalando");
+  ok(zal && zal.title === "Data Engineer (All genders)", "employers: Zalando title survives intact");
+  // Zalando URLs carry literal parens; a `[^)\s]+` link pattern drops the final
+  // ")" and yields a 404 that looks like a healthy row. Assert the whole URL.
+  ok(zal && zal.url === "https://jobs.zalando.com/en/jobs/2724318-Data-Engineer-(All-genders)",
+     "employers: parenthesised Zalando URL is captured whole, not truncated");
+  const mre = empJobs.find(j => j.company === "Munich Re");
+  ok(mre && mre.title === "Claims Data Scientist" && /London/.test(mre.location),
+     "employers: 'Role in City at Unit' splits into title + location");
+  const kla = empJobs.find(j => j.company === "Klarna");
+  ok(kla && kla.title === "Lead Data Engineer", "employers: '@ Klarna' suffix stripped from title");
+  ok(!empJobs.some(j => /blogs\/techblog/.test(j.url)), "employers: Otto blog path cannot masquerade as a posting");
+  // Employer rows default location to the query country, so (company,city) would
+  // fold a whole board into one row. They must survive collapseBranchDupes.
+  const empCollapse = collapseBranchDupes([
+    { url: "z1", company: "Zalando", location: "Germany", source_portal: "Employer site (Zalando)" },
+    { url: "z2", company: "Zalando", location: "Germany", source_portal: "Employer site (Zalando)" },
+  ]);
+  ok(empCollapse.length === 2, "employers: two same-company same-country rows are kept, not branch-collapsed");
+  // A second call must behave identically — the SITES regexes carry /g, and a
+  // leaked lastIndex would make extraction silently skip rows on later batches.
+  ok(PORTALS.employers.extract('[Data Engineer (All genders)](https://jobs.zalando.com/en/jobs/2724318-Data-Engineer-(All-genders))',
+       "", "", "Data Engineer", "Germany").length === 1,
+     "employers: repeat extract is not broken by regex lastIndex carry-over");
 
   // Bug 2 — collapseBranchDupes must NOT fold distinct Civil Service vacancies
   // (all share company "UK Civil Service" + location "UK") …
@@ -258,11 +418,8 @@ const CFG = loadConfig();
 // Bulk-scrape query catalog. Renamed from `apify:` → `bulk_scrape:` (2026-07-01);
 // old key accepted as fallback.
 const BULK = CFG.bulk_scrape || CFG.apify || {};
-const DATABASE_ID = CFG.notion && CFG.notion.applications_database_id;
-if (!DATABASE_ID && !has("--self-test")) {
-  console.error("ROUTINE_ABORT: notion.applications_database_id not set in config/profile.yml");
-  process.exit(5);
-}
+const DATABASE_ID = (CFG.notion && CFG.notion.applications_database_id)
+  || "eace68a2-e454-4a6d-ab9d-ed5dfcd65c72";
 
 // Bright Data SERP zone (Web Unlocker) for Google-SERP discovery. The generic
 // dataset scraper pointed at google.com/search gets served Google's consent/chrome
@@ -296,6 +453,50 @@ if (BULK && BULK.generate_queries) {
   ];
 }
 
+// Which portals honour a query's optional `city:` field (2026-08-14).
+// Scoped to eFC ONLY by default, deliberately: eFC is the one portal measured
+// to be strongly city-sensitive (data-engineer Berlin 27/43 on-target vs
+// Frankfurt 6/43). Stepstone and Xing are also city-aware in the sense that
+// they expand TOP_CITIES, but pinning them to a single city NARROWS their
+// coverage (Xing drops from its top-3 cities to one) and costs extra fetches
+// for no measured gain. An entry can widen this for itself with
+// `city_portals: [efc, xing]`.
+const CITY_DEFAULT_PORTALS = (BULK && BULK.city_default_portals) || ["efc"];
+
+// Resolve the city a given portal should use for a given query. Returns null
+// when the portal is out of scope, which makes portal.urls() fall back to its
+// normal TOP_CITIES expansion — producing URLs identical to the country-level
+// entry, which the per-portal dedupe in plan() then collapses to zero cost.
+function cityFor(q, portalKey) {
+  if (!q.city) return null;
+  const scope = (q.city_portals && q.city_portals.length) ? q.city_portals : CITY_DEFAULT_PORTALS;
+  return scope.includes(portalKey) ? q.city : null;
+}
+
+// ─── German-language query variants (2026-08-18) ─────────────────────────
+// The query catalog is English-only, so German-TITLED ads on the DACH-native
+// boards ("Datenanalyst") matched no query string and were never discovered.
+// Terms come from role-taxonomy.yml's `lang` field — never hardcoded here — so
+// the query side and deriveTitleFilter's matching side cannot drift apart.
+const DE_VARIANTS = (BULK && BULK.german_query_variants) || {};
+const DE_VARIANTS_ON = DE_VARIANTS.enabled === true;
+const DE_VARIANT_PORTALS = DE_VARIANTS.portals || ["xing", "stepstone", "efc"];
+const DE_VARIANT_COUNTRIES = DE_VARIANTS.countries || ["Germany", "Austria", "Switzerland"];
+const _deTax = DE_VARIANTS_ON ? loadTaxonomy(".") : null;
+
+/**
+ * Role strings to query for one {query, portal} pair: always the English role,
+ * plus its German equivalents when the portal AND country are both in scope.
+ * Returns [role] unchanged when the feature is off, the board is not DACH-native,
+ * or the archetype has no German title (AE — DACH writes "Analytics Engineer").
+ */
+function rolesFor(q, portalKey) {
+  if (!DE_VARIANTS_ON || !_deTax) return [q.role];
+  if (!DE_VARIANT_PORTALS.includes(portalKey)) return [q.role];
+  if (!DE_VARIANT_COUNTRIES.includes(q.country)) return [q.role];
+  return [q.role, ...translateRole(_deTax, q.role, "de")];
+}
+
 // Country → top cities for portals that need city-level filtering
 const TOP_CITIES = (BULK && BULK.country_top_cities) || {
   Germany: ["Berlin","Munich","Hamburg","Frankfurt"],
@@ -327,12 +528,13 @@ let _indeedKept = 0;
 const PORTALS = {
   stepstone: {
     name: "Stepstone",
-    urls(role, country, pages) {
+    urls(role, country, pages, city) {
       const geo = COUNTRY_TO_GEO[country];
       if (!geo || geo === "GB" || geo === "FR" || geo === "NL" || geo === "IE") return [];
       const slug = slugify(role);
-      // Page 1 = city-faceted variant (richer card output); page 2+ = generic search
-      const cities = (TOP_CITIES[country] || []).slice(0, 1);
+      // Page 1 = city-faceted variant (richer card output); page 2+ = generic search.
+      // An explicit q.city overrides the default top-1 city.
+      const cities = city ? [city] : (TOP_CITIES[country] || []).slice(0, 1);
       const base = cities.length
         ? `https://www.stepstone.de/jobs/${slug}/in-${cities[0].toLowerCase()}`
         : `https://www.stepstone.de/jobs/${slug}?action=search`;
@@ -376,14 +578,15 @@ const PORTALS = {
 
   xing: {
     name: "Xing",
-    urls(role, country, pages) {
-      // Xing is DACH-native — only emit for DE/AT/CH; expand to cities for better coverage
-      const cities = TOP_CITIES[country] || [];
+    urls(role, country, pages, city) {
+      // Xing is DACH-native — only emit for DE/AT/CH; expand to cities for better coverage.
+      // An explicit q.city pins to that one city instead of the TOP_CITIES top-3.
+      const cities = city ? [city] : (TOP_CITIES[country] || []);
       if (cities.length === 0) return [];
       const urls = [];
-      for (const city of cities.slice(0, 3)) {
+      for (const c of cities.slice(0, 3)) {
         const k = encodeURIComponent(role);
-        const l = encodeURIComponent(city);
+        const l = encodeURIComponent(c);
         for (let p = 0; p < pages; p++) {
           urls.push(`https://www.xing.com/jobs/search?keywords=${k}&location=${l}${p > 0 ? `&page=${p+1}` : ""}`);
         }
@@ -445,14 +648,18 @@ const PORTALS = {
 
   efc: {
     name: "eFinancialCareers",
-    urls(role, country, pages) {
+    urls(role, country, pages, city) {
       const tld = country === "United Kingdom" ? "co.uk" : "de";
       const slug = slugify(role);
       // eFC listing URL: /jobs/{slug}[/in-{city}][?page=N]
-      const cities = (TOP_CITIES[country] || []).slice(0, 2); // top 2 cities per country
-      const out = [`https://www.efinancialcareers.${tld}/jobs/${slug}`];
-      for (const city of cities) {
-        out.push(`https://www.efinancialcareers.${tld}/jobs/${slug}/in-${city.toLowerCase()}`);
+      // eFC is the most city-sensitive portal we scrape: measured 2026-08-14,
+      // data-engineer/in-berlin returned 27 on-target of 43 cards while the same
+      // role in Frankfurt returned 6 of 43. So an explicit q.city pins to that
+      // city AND drops the country-wide base URL, which is the noisiest of the set.
+      const cities = city ? [city] : (TOP_CITIES[country] || []).slice(0, 2); // top 2 cities per country
+      const out = city ? [] : [`https://www.efinancialcareers.${tld}/jobs/${slug}`];
+      for (const c of cities) {
+        out.push(`https://www.efinancialcareers.${tld}/jobs/${slug}/in-${c.toLowerCase()}`);
       }
       return out.slice(0, pages); // honour --pages cap (each URL is one listing page already serves ~40 jobs)
     },
@@ -739,7 +946,8 @@ const PORTALS = {
       // FIXED 2026-07-13: was `/\(\/jobs\/…\)/` (relative link in parens), but the
       // Firecrawl render emits ABSOLUTE URLs — `](https://sponsoredjobs.co.uk/jobs/X-at-Y)`
       // — so the paren-prefixed relative pattern matched 0. Match the absolute URL
-      // anywhere. Also required routing sponsoredjobs through Firecrawl (BD generic
+      // anywhere (same fix class as the 2026-06-04 xing/careerbee "(URL) requirement"
+      // removal). Also required routing sponsoredjobs through Firecrawl (BD generic
       // returned a JS shell with no links).
       const re = /https?:\/\/sponsoredjobs\.co\.uk\/jobs\/([a-z0-9-]+)-at-([a-z0-9-]+)/g;
       let m;
@@ -806,10 +1014,124 @@ const PORTALS = {
     },
   },
 
+  employers: {
+    name: "Tracked employer sites",
+    // Single-stage SERP-title (added 2026-08-15). Covers tracked_companies in
+    // portals.yml that scan.mjs cannot reach: their careers sites run on
+    // SuccessFactors / Avature / iCIMS / Eightfold / Deel or are SPA-only, none
+    // of which expose a public JSON board. Those entries resolved to no provider
+    // and were scanned by NOTHING — scan.mjs reported them only as a count, and
+    // the `scan_method: chrome_scan` they carried pointed at lunchtime-scan,
+    // retired 2026-08-02. Their job DETAIL pages are Google-indexed even when
+    // their search UI is not, so SERP discovery reaches what the API path can't.
+    //
+    // Verified per-domain against the live SERP zone on 2026-08-15; every entry
+    // below returned real job-detail URLs. Two candidates were dropped and must
+    // NOT be re-added without new evidence:
+    //   Deutsche Bank  careers.db.com routes jobs through a #/professional/job
+    //                  hash, so no per-job URL exists to index. A site: query
+    //                  returns only programme/landing pages.
+    //   TravelPerk     rebranded to perk.com; neither travelperk.com nor
+    //                  perk.com has indexed job pages (blog + support only).
+    //
+    // Cost: employers are OR-ed into ONE query per group, so a group costs the
+    // same as any other SERP portal rather than one query per company. Groups
+    // are capped at GROUP_SIZE because a wide OR lets one domain crowd out the
+    // rest — measured 2026-08-15: a 7-domain OR returned 5 of 7 domains, while
+    // the same query split in two returned all of them, and a Revolut+Klarna
+    // pair went 10/10 to Revolut. Four is the compromise between spread and
+    // fetch count.
+    SITES: [
+      // country: which query countries this board is worth searching under.
+      { company: "Zalando",          site: "jobs.zalando.com",                 countries: ["Germany"],
+        re: /https?:\/\/jobs\.zalando\.com\/[a-z]{2}\/jobs\/[^\s)]+/gi,                        strip: /\s*[-|]\s*Zalando.*$/i },
+      { company: "SAP",              site: "jobs.sap.com/job",                 countries: ["Germany", "Austria"],
+        re: /https?:\/\/jobs\.sap\.com\/job\/[^\s)]+/gi,                                       strip: /\s*Job Details.*$/i },
+      { company: "Deutsche Telekom", site: "careers.telekom.com/en/jobs",      countries: ["Germany"],
+        re: /https?:\/\/careers\.telekom\.com\/[a-z]{2}\/jobs\/[^\s)]+/gi,                     strip: /\s*\|\s*Global Career Website.*$/i },
+      { company: "adesso SE",        site: "jobs.adesso-group.com/job",        countries: ["Germany", "Austria"],
+        re: /https?:\/\/jobs\.adesso-group\.com\/job[^\s)]+/gi,                                strip: /\s*(Stellendetails|Job Details).*$/i },
+      { company: "Munich Re",        site: "careers.munichre.com/en/job",      countries: ["Germany", "United Kingdom"],
+        re: /https?:\/\/careers\.munichre\.com\/[a-z]{2}\/job\/[^\s)]+/gi,                     strip: null },
+      { company: "Otto Group",       site: "otto.de/jobs/de/stellenangebote",  countries: ["Germany"],
+        re: /https?:\/\/www\.otto\.de\/jobs\/de\/stellenangebote\/[^\s)]+/gi,                  strip: null },
+      { company: "Siemens",          site: "jobs.siemens.com",                 countries: ["Germany", "Austria"],
+        re: /https?:\/\/jobs\.siemens\.com\/[a-z]{2}_[A-Z]{2}\/externaljobs\/JobDetail\/\d+/gi, strip: /\s*-\s*Job Detail.*$/i },
+      { company: "Booking.com",      site: "jobs.booking.com/booking/jobs",    countries: ["Netherlands"],
+        re: /https?:\/\/jobs\.booking\.com\/booking\/jobs\/\d+[^\s)]*/gi,                      strip: /\s*\|\s*Booking\.com.*$/i },
+      { company: "Klarna",           site: "jobs.deel.com/klarna",             countries: ["Germany", "United Kingdom"],
+        re: /https?:\/\/jobs\.deel\.com\/klarna\/job-details\/[a-f0-9-]+[^\s)]*/gi,            strip: /\s*@\s*Klarna.*$/i },
+      { company: "Revolut",          site: "revolut.com/careers/position",     countries: ["United Kingdom"],
+        re: /https?:\/\/www\.revolut\.com\/careers\/position\/[^\s)]+/gi,                      strip: /\s*\|\s*Revolut.*$/i },
+    ],
+    GROUP_SIZE: 4,
+    urls(role, country, pages) {
+      const mine = this.SITES.filter(s => s.countries.includes(country));
+      if (!mine.length) return [];   // e.g. Ireland — no tracked employer board
+      const out = [];
+      for (let i = 0; i < mine.length; i += this.GROUP_SIZE) {
+        const group = mine.slice(i, i + this.GROUP_SIZE);
+        const clause = "(" + group.map(s => `site:${s.site}`).join(" OR ") + ")";
+        for (let p = 0; p < pages; p++) {
+          const params = new URLSearchParams({ q: `${clause} "${role}"`, start: String(p * 10) });
+          out.push(`https://www.google.com/search?${params.toString()}`);
+        }
+      }
+      return out;
+    },
+    extract(md, _inputUrl, _html, role, country) {
+      const out = [];
+      const seen = new Set();
+      // Parse [title](link) pairs from organicToMarkdown(), which emits exactly
+      // one result per line. Match LINE-WISE with a greedy URL group so the last
+      // ")" on the line closes the link: Zalando's URLs contain literal parens
+      // (…/2724318-Data-Engineer-(All-genders)), and the usual `[^)\s]+` pattern
+      // silently truncates them one char short — a 404 that still looks like a
+      // valid row all the way into Notion.
+      for (const line of String(md || "").split(/\r?\n/)) {
+        const m = line.match(/^\s*\[(.{3,200})\]\((https?:\/\/.+)\)\s*$/);
+        if (!m) continue;
+        const rawTitle = m[1].trim();
+        const url = m[2].replace(/[#].*$/, "").replace(/\/$/, "");
+        // Attribute by URL, never by SERP title: a careers site freely renders
+        // its own brand into the title, but only the URL proves whose board it
+        // is. Each `re` is anchored to a job-DETAIL path so category and blog
+        // pages (Otto surfaces plenty of both) can't be mistaken for postings.
+        const site = this.SITES.find(s => { s.re.lastIndex = 0; return s.re.test(url); });
+        if (!site) continue;
+        const cu = url.replace(/[?].*$/, "");
+        if (seen.has(cu)) continue;
+        seen.add(cu);
+        let title = site.strip ? rawTitle.replace(site.strip, "").trim() : rawTitle;
+        // Several of these boards render "Role in {City}[, Country][ at {Unit}]"
+        // (Munich Re, Booking.com). Pull the city out rather than leaving it in
+        // the title, where it would fight the role-taxonomy title filter.
+        let location = country;
+        const inAt = title.match(/^(.*?)\s+in\s+([^,]+?)(?:,\s*([^,]+?))?(?:\s+at\s+(.+))?$/i);
+        if (inAt && inAt[1] && inAt[2] && inAt[2].length < 40) {
+          title = inAt[1].trim();
+          location = [inAt[2].trim(), (inAt[3] || "").trim()].filter(Boolean).join(", ");
+        }
+        title = title.replace(/\s*[-–|]\s*$/, "").trim();
+        if (!title) continue;
+        out.push({
+          url,
+          title,
+          company: site.company,
+          location,
+          source_portal: `Employer site (${site.company})`,
+          jd_summary: `[employers: ${site.company} careers site; title from SERP — no public JSON board, detail unverified]`,
+        });
+      }
+      return out;
+    },
+  },
+
   // Make-it-in-Germany dropped 2026-06-05 — hard-blocked by perfdrive.com CAPTCHA.
   // Both BD and Firecrawl return the captcha shield page, not job listings.
   // No scrape path works without solving CAPTCHAs. CareerBee + Xing + Stepstone
-  // already cover the DE market.
+  // already cover the DE market. NOTE it is also a tracked_companies entry with
+  // no provider — do not "fix" it there either; the block is the same CAPTCHA.
 };
 
 // Run the self-test now that PORTALS exists, so its assertions can exercise the
@@ -825,9 +1147,32 @@ function plan() {
     const portal = PORTALS[portalKey];
     if (!portal) continue;
     const list = [];
+    const seenUrl = new Set();
     for (const q of QUERIES) {
-      for (const u of portal.urls(q.role, q.country, PAGES)) {
-        list.push({ url: u, role: q.role, country: q.country, portal: portalKey });
+      // q.city is OPTIONAL (added 2026-08-14) and scoped by cityFor() to the
+      // portals in `city_portals` / CITY_DEFAULT_PORTALS — eFC only by default.
+      // Out-of-scope portals get null and expand TOP_CITIES as they always did.
+      // rolesFor() adds the German-language variants on the DACH-native boards
+      // (2026-08-18); it returns [q.role] alone everywhere else, so every other
+      // portal plans byte-identically to before.
+      for (const role of rolesFor(q, portalKey)) {
+      for (const u of portal.urls(role, q.country, PAGES, cityFor(q, portalKey))) {
+        // Google-SERP discovery URLs carry the freshness window as tbs=qdr:hN,
+        // so stale postings are never fetched. withRecency is a no-op on the
+        // portals that build their own URLs — those are post-filtered instead.
+        const url = WINDOW_HOURS ? withRecency(u, WINDOW_HOURS) : u;
+        // Dedupe within the portal. A city-qualified query collapses onto the
+        // identical URL on portals that ignore `city`, so without this every
+        // city variant added to bulk_scrape.queries would double-fetch (and
+        // double-bill) on the Google-SERP portals. Strictly a saving: it can
+        // only ever drop an exact-duplicate fetch.
+        if (seenUrl.has(url)) continue;
+        seenUrl.add(url);
+        // Record the role ACTUALLY queried, not q.role — otherwise a German
+        // variant's rows are tagged with the English string and the per-role
+        // yield stats silently credit the wrong query.
+        list.push({ url, role, country: q.country, city: q.city || null, portal: portalKey });
+      }
       }
     }
     urlsByPortal.set(portalKey, list);
@@ -858,16 +1203,61 @@ async function bdFetch(urls, datasetId = DATASET_GENERIC) {
 // ─── Bright Data SERP zone (Google discovery) ────────────────────────────
 // Returns Google organic results [{title, link}] for a google.com/search URL via
 // the Web Unlocker SERP zone — reliable where the generic scraper gets blocked.
+// 2026-08-11: retry + diagnosable errors.
+//
+// The 08-11 run logged 119 identical `SERP non-JSON (zone/parse)` failures and
+// lost the entire SERP tier (LinkedIn, WTTJ, Indeed, Civil Service Jobs); only
+// the Firecrawl portals produced anything. Investigating it took a full session
+// because the old error threw away everything needed to explain itself: no HTTP
+// status, no response body, and the same string for a bad zone, a rate limit, a
+// captcha page and a network blip.
+//
+// The cause was neither config nor suspension. Verified after the fact: the same
+// call returns HTTP 200 with valid JSON and 10 organic results, and 8 concurrent
+// calls all succeed. What actually happened is that bd-bulk-scan fired at 08:06
+// in a Task Scheduler catch-up burst on machine wake (it is scheduled 11:30),
+// alongside morning-scan, on a host whose network had just come back. One
+// transient window, and every query failed with no second attempt.
+//
+// So: retry transient faults (fetchWithRetry covers 429/5xx and network resets
+// with jittered backoff), and when it still fails, SAY WHY.
 async function bdSerp(googleUrl) {
   const u = googleUrl + (googleUrl.includes("?") ? "&" : "?") + "brd_json=1&num=20&hl=en";
-  const r = await fetch("https://api.brightdata.com/request", {
-    method: "POST",
-    headers: { Authorization: "Bearer " + BD_API_KEY, "Content-Type": "application/json" },
-    body: JSON.stringify({ zone: SERP_ZONE, url: u, format: "raw" }),
-  });
-  if (!r.ok) throw new Error(`SERP HTTP ${r.status}`);
+  // An EMPTY 200 is Bright Data's silent-failure shape, and fetchWithRetry
+  // cannot catch it: 200 is not a retryable status and nothing throws, so the
+  // retry layer waves it through. Same defect the 08-10 fix caught in
+  // batch/_autodraft_fetch_jds.mjs (a suspended/blipping unblocker answers 200
+  // with a zero-byte body and reports the reason only in x-brd-err-* headers).
+  // Seen live on 2026-08-11: `SERP non-JSON [unrecognised (0B)] http=200`.
+  // So the emptiness check has to drive its own retry, outside fetchWithRetry.
+  let r, body = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(res => setTimeout(res, 1500 * attempt + Math.floor(Math.random() * 400)));
+    r = await fetchWithRetry("https://api.brightdata.com/request", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + BD_API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ zone: SERP_ZONE, url: u, format: "raw" }),
+    }, { label: "bd-serp", retries: 3 });
+    body = await r.text();
+    if (body.trim().length > 0) break;
+    const hdr = r.headers.get("x-brd-err-code") || r.headers.get("proxy-status") || "";
+    console.error(`  bd-serp: empty 200 body (attempt ${attempt + 1}/3)${hdr ? " hdr=" + hdr : ""}`);
+  }
+  if (!r.ok) throw new Error(`SERP HTTP ${r.status}: ${body.slice(0, 120).replace(/\s+/g, " ")}`);
   let j;
-  try { j = JSON.parse(await r.text()); } catch { throw new Error("SERP non-JSON (zone/parse)"); }
+  try {
+    j = JSON.parse(body);
+  } catch {
+    // Name the shape when it is recognisable, so the log is actionable rather
+    // than merely alarming. A 200 carrying HTML is the usual tell.
+    const head = body.slice(0, 200).replace(/\s+/g, " ");
+    const shape = /<!doctype html|<html/i.test(head) ? "HTML error page"
+      : /rate.?limit|too many requests/i.test(head) ? "rate limited"
+      : /captcha|unusual traffic/i.test(head) ? "captcha/bot wall"
+      : /unauthor|invalid.*token|forbidden/i.test(head) ? "auth rejected (check BRIGHTDATA_API_KEY / zone)"
+      : `unrecognised (${body.length}B)`;
+    throw new Error(`SERP non-JSON [${shape}] zone=${SERP_ZONE} http=${r.status}: ${head.slice(0, 100)}`);
+  }
   return Array.isArray(j.organic) ? j.organic : [];
 }
 
@@ -883,7 +1273,7 @@ function organicToMarkdown(organic) {
 // ─── Clean-gate filters — keep Notion lean ───────────────────────────────
 // Reject upstream so dirty rows never reach Notion. Categories:
 //   1. Placeholder titles (extractor couldn't read the real title)
-//   2. Seniority outside the candidate's target band (Senior/Lead/Junior/etc)
+//   2. Seniority outside the configured target band (Senior/Lead/Junior/etc)
 //   3. Wrong-tech / wrong-domain (Java dev, blockchain, iOS, embedded …)
 //   4. No positive role match (REQUIRED — not "let auto-eval decide")
 //   5. Wrong geography (India/SG/AU/US-only/etc) when location is known
@@ -902,6 +1292,18 @@ const _NEG_EXTRA = [
   // listed here — they used to be, which wrongly overrode the role-taxonomy widening.
   "Intern", "Internship", "Placement", "Apprentice", "Apprenticeship",
   "Werkstudent", "Working Student", "Praktikum", "Praktikant",
+  // German pre-graduate terms (2026-08-18 per operator). Mirrors the
+  // `match: substring` block in config/role-taxonomy.yml — kept in sync so the
+  // fallback is not weaker than the taxonomy it stands in for.
+  "Ausbildung", "Auszubildende", "Azubi", "Duales Studium", "Dualer Student",
+  "Studentische Hilfskraft", "Umschulung", "Weiterbildung",
+];
+// Fallback counterpart to taxonomy `match: substring`. German compounds and
+// inflections only — never short English terms, which need word boundaries.
+const _NEG_EXTRA_SUBSTRING = [
+  "Werkstudent", "Praktikum", "Praktikant", "Ausbildung", "Auszubildende",
+  "Azubi", "Duales Studium", "Dualer Student", "Studentische Hilfskraft",
+  "Umschulung", "Weiterbildung",
 ];
 const _POS_FALLBACK = [
   "Analytics Engineer", "Data Scientist", "Data Engineer", "Data Analyst",
@@ -913,6 +1315,10 @@ const _POS_FALLBACK = [
 const _titleTax = loadTaxonomy(".");
 const _titleFilter = _titleTax ? deriveTitleFilter(_titleTax) : null;
 const TITLE_NEG = _titleFilter ? [...new Set([..._titleFilter.negative, ..._NEG_EXTRA])] : _NEG_EXTRA;
+const TITLE_NEG_SUBSTRING = [...new Set([
+  ...(_titleFilter?.negativeSubstring || []), ..._NEG_EXTRA_SUBSTRING,
+])];
+const TITLE_NEG_SPEC = { negative: TITLE_NEG, negativeSubstring: TITLE_NEG_SUBSTRING };
 const TITLE_POS = _titleFilter ? _titleFilter.positive : _POS_FALLBACK;
 if (_titleFilter) {
   console.error(`bd-bulk-scan: title filter from role-taxonomy.yml — ${TITLE_POS.length} positive / ${TITLE_NEG.length} negative`);
@@ -953,12 +1359,15 @@ function passesFilter(job) {
 
   // (2) Seniority band — strict reject. Graduate/Junior/Trainee ARE in scope
   // (role-taxonomy widening); Intern/Internship/Placement/Apprentice(ship)/
-  // Werkstudent/Praktikum are prohibited and live in TITLE_NEG. No per-portal
-  // exemption — the band is uniform across every portal, including Bright Network.
-  for (const n of TITLE_NEG) {
-    const re = new RegExp("\\b" + n.trim().replace(/[.+?*[\](){}|\\^$]/g, "\\$&") + "\\b", "i");
-    if (re.test(t)) return false;
-  }
+  // Werkstudent/Praktikum/Ausbildung are prohibited and live in TITLE_NEG. No
+  // per-portal exemption — the band is uniform across every portal, including
+  // Bright Network.
+  //
+  // Matching is delegated to matchNegative() so this scanner and morning-scan
+  // agree. It word-bounds English terms and substring-matches the German ones:
+  // this loop used to word-bound EVERYTHING, which let "Werkstudentin" and
+  // "Ausbildungsplatz" through — a trailing \b cannot end mid-compound.
+  if (matchNegative(t, TITLE_NEG_SPEC)) return false;
 
   // (3) Wrong-tech / wrong-domain
   for (const w of WRONG_TECH) {
@@ -1002,7 +1411,14 @@ function collapseBranchDupes(jobs) {
     // (one umbrella name across hundreds of departments) and Bright Network (every
     // row is location "UK", so a company's multiple grad roles would collapse to one).
     // Keep each posting by URL instead.
-    if (!co || co.startsWith("undisclosed") || j.source_portal === "Civil Service Jobs" || j.source_portal === "Bright Network") {
+    // Employer-site rows (2026-08-15) fall in the same bucket: they fall back to
+    // the QUERY COUNTRY when the SERP title carries no city, so every Zalando
+    // role reads location "Germany" and (company,city) would fold a whole board
+    // down to one row per employer per run. On a direct employer board two Data
+    // Engineer posts in Berlin are two real vacancies, not a syndicated branch
+    // dupe, so key them by URL like the other exempt portals.
+    if (!co || co.startsWith("undisclosed") || j.source_portal === "Civil Service Jobs" || j.source_portal === "Bright Network"
+        || String(j.source_portal || "").startsWith("Employer site")) {
       groups.set(j.url, j);
       continue;
     }
@@ -1013,48 +1429,12 @@ function collapseBranchDupes(jobs) {
   return [...groups.values()];
 }
 
-// ─── URL canonicalisation (used for dedup) ──────────────────────────────
-// Different scrapers and HTML refs can emit the same job URL with:
-//   - %5F-vs-underscore encoding ("Data%5FEngineer" vs "Data_Engineer")
-//   - mixed case in the host
-//   - tracking query strings (?utm=..., ?_l=en, &fsk=...)
-//   - trailing slashes
-//   - .html extension presence/absence
-// The canonical form drops all of those so the dedup key is invariant.
-function canonicalUrl(u) {
-  if (!u) return "";
-  let s;
-  try { s = decodeURIComponent(u); } catch { s = u; }   // %5F → _
-  s = s.split("#")[0];                                  // strip fragment
-  // The job id lives in the QUERY STRING for some portals (Civil Service
-  // jobs.cgi?jcode=…, Indeed viewjob?jk=…). Capture it before dropping the query,
-  // else every distinct vacancy collapses to the same base path and is deduped.
-  const idMatch = s.match(/[?&](jcode|jk)=([A-Za-z0-9]+)/i);
-  s = s.split("?")[0];                                  // strip the rest of the query string
-  s = s.toLowerCase();                                  // host + path lower
-  s = s.replace(/\/+$/, "");                            // trailing slash
-  s = s.replace(/-inline\.html$/, "");                  // Stepstone -inline.html variant
-  s = s.replace(/\.html$/, "");                         // any .html suffix
-  if (idMatch) s += `?${idMatch[1].toLowerCase()}=${idMatch[2].toLowerCase()}`;
-  return s;
-}
-
-// ─── Persistent dedup cache (cross-run) ──────────────────────────────────
-// Stored as canonical forms so the same job from two sources/encodings
-// dedups across runs.
-const SEEN_PATH = "data/bd-seen-urls.json";
-function loadSeen() {
-  if (!existsSync(SEEN_PATH)) return new Set();
-  try {
-    const raw = JSON.parse(readFileSync(SEEN_PATH, "utf8"));
-    // Re-canonicalise on load: heals any legacy entries written before this fix
-    return new Set(raw.map(canonicalUrl));
-  } catch { return new Set(); }
-}
-function saveSeen(s) {
-  if (!existsSync("data")) mkdirSync("data");
-  writeFileSync(SEEN_PATH, JSON.stringify([...s], null, 2));
-}
+// ─── URL canonicalisation + persistent dedup cache ──────────────────────
+// Both moved to ./seen-ledger.mjs on 2026-08-12 (imported at the top of this
+// file) so chrome-scan-visible dedups against the same ledger with the same
+// key. Behaviour is unchanged; `node seen-ledger.mjs --self-test` pins the
+// canonicalisation rules (query-string job ids for Civil Service/Indeed,
+// Stepstone -inline.html, .html suffixes, encoding + case + trailing slash).
 
 // ─── Main ────────────────────────────────────────────────────────────────
 const start = Date.now();
@@ -1087,10 +1467,10 @@ console.error(`bd-bulk-scan: local seen-cache loaded with ${seen.size} canonical
 // is ever deleted or out of sync.
 //
 // ALSO builds a company+position(+city) map for the CROSS-PORTAL gate: the same
-// vacancy posted on two portals has two unrelated URLs (e.g. the same role on
-// Xing AND eFinancialCareers), so URL dedup can never catch it. A new job whose
-// company + inferred position (+ compatible city) already exists in the window
-// is skipped at insert.
+// vacancy posted on two portals has two unrelated URLs (e.g. Bitpanda AE on
+// Xing AND eFinancialCareers, found 2026-07-19), so URL dedup can never catch
+// it. A new job whose company + inferred position (+ compatible city) already
+// exists in the window is skipped at insert.
 function normCityKey(loc) {
   let s = String(loc || "").toLowerCase().split(/[,\/]/)[0].trim();
   for (const [a, b] of [["wien", "vienna"], ["münchen", "munich"], ["muenchen", "munich"], ["köln", "cologne"], ["koeln", "cologne"], ["frankfurt am main", "frankfurt"]]) {
@@ -1106,11 +1486,23 @@ async function preloadNotionUrls() {
   do {
     const body = { page_size: 100, filter };
     if (cursor) body.start_cursor = cursor;
-    const r = await fetch(`https://api.notion.com/v1/databases/${DATABASE_ID}/query`, {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${NOTION_TOKEN}`, "Notion-Version": "2022-06-28", "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    let r;
+    try {
+      r = await fetchWithRetry(`https://api.notion.com/v1/databases/${DATABASE_ID}/query`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${NOTION_TOKEN}`, "Notion-Version": "2022-06-28", "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }, { label: "bd-bulk-scan notion-preload" });
+    } catch (e) {
+      // A network-layer failure is a THROW, not a non-ok response, so the
+      // `if (!r.ok)` degrade path below never saw it. That is exactly how an
+      // ECONNRESET against api.notion.com killed whole runs (264 URLs, 10
+      // portals) on 2026-08-07 and in 19 other logs since June. The preload is
+      // an optimisation over the local seen-cache, so failing it must degrade,
+      // never abort.
+      console.error(`bd-bulk-scan: Notion preload unreachable after retries (${e.code || e.message}) — relying on local cache only`);
+      return 0;
+    }
     if (!r.ok) {
       console.error(`bd-bulk-scan: Notion preload failed (${r.status}) — relying on local cache only`);
       return 0;
@@ -1166,10 +1558,16 @@ if (has("--probe-xportal")) {
   const [compRaw, pos] = firstKey.split("::");
   const cities = seenCompanyPos.get(firstKey);
   const knownCity = [...cities].find((c) => c !== "") ?? "";
+  // De-normalise a plausible display company + a title that inferPosition maps
+  // back to `pos` (the canonical Position IS a valid title substring for all 6).
   const sampleJob = { company: compRaw, title: pos, location: knownCity, url: "https://probe.test/x", source_portal: "ProbeTest" };
   check(`positive: known ${compRaw.trim()}|${pos}|${knownCity || "(no-city)"} → dupe`, isCrossPortalDupe(sampleJob), true);
+  // Unknown city on a known company+position: dupe when the candidate city is
+  // unknown/empty (freeform portal data) — matches the OR-empty branch.
   check(`positive: known ${pos} w/ blank city → dupe`, isCrossPortalDupe({ ...sampleJob, location: "" }), true);
+  // Guaranteed-absent company → not a dupe.
   check("negative: novel company → not dupe", isCrossPortalDupe({ ...sampleJob, company: "Zzq Nonexistent Probe Co GmbH" }), false);
+  // Undisclosed company is never keyed → never a dupe.
   check("negative: Undisclosed company → not dupe", isCrossPortalDupe({ ...sampleJob, company: "Undisclosed (Indeed)" }), false);
   let failed = 0;
   for (const r of results) {
@@ -1181,7 +1579,16 @@ if (has("--probe-xportal")) {
 }
 
 const allJobs = [];
+// Seeded from the PLAN, not lazily on first hit. A lazily-keyed object cannot
+// express "this portal was fetched and produced nothing": the portal simply
+// drops out of JOBS_PER_PORTAL, which reads as though it was never scheduled.
+// On 2026-08-27 both direct-site portals (stepstone, efc) returned no usable
+// rows for all 64 of their URLs and vanished from the contract line, while the
+// run reported ERRORS: 1 and exited 0 — indistinguishable from a healthy run,
+// and invisible to the watchdog's "zero across two consecutive runs" rule.
+// Seeding means every planned portal reports :0 instead of disappearing.
 const portalCounts = {};
+for (const portalKey of urlPlan.keys()) portalCounts[portalKey] = 0;
 const errors = [];
 
 // Portals routed through self-hosted Firecrawl (BD returns unhydrated React
@@ -1208,8 +1615,14 @@ if (fcFlat.length > 0 && !DRY_RUN) {
   console.error(`  firecrawl: ${fcFlat.length} URLs (${portalBreakdown}) via ${FIRECRAWL_URL} (self-hosted, no API key)`);
   const fcUp = await firecrawlPingWithRecovery();
   if (!fcUp) {
+    const affected = [...new Set(fcFlat.map(x => x.portalKey))].join(", ");
     errors.push(`firecrawl_down: ${FIRECRAWL_URL} not reachable — Firecrawl portals skipped. Start the daemon with: docker compose up -d (in firecrawl checkout)`);
     console.error(`  firecrawl: DOWN at ${FIRECRAWL_URL} — skipping all ${fcFlat.length} Firecrawl URLs`);
+    // Machine-greppable marker for the watchdog. Before 2026-08-09 nothing in
+    // system-eval.mjs knew Firecrawl existed, which is how Xing and CareerBee
+    // stayed dead for weeks without a single alert. Keep this string and the
+    // pattern in system-eval.mjs ROUTINE_LOG_SIGNALS in step.
+    console.error(`  FIRECRAWL_DOWN_ALERT: ${fcFlat.length} URLs skipped across [${affected}] — these portals produced ZERO rows this run`);
   } else {
     for (let i = 0; i < fcFlat.length; i += MAX_BATCH) {
       const chunk = fcFlat.slice(i, i + MAX_BATCH);
@@ -1303,13 +1716,21 @@ for (let i = 0; i < directFlat.length; i += MAX_BATCH) {
   try {
     results = await bdFetch(urls, DATASET_GENERIC);
   } catch (e) {
-    errors.push(`batch_fail: ${e.message}`);
+    errors.push(`batch_fail (${[...new Set(chunk.map((c) => c.portalKey))].join("/")}): ${e.message}`);
     continue;
   }
+  // Which of this batch's URLs came back at all. `results` is built from the
+  // JSONL rows BD actually returned, so a URL it omits never enters the loop
+  // below — and a row whose URL no longer matches its request (redirect) fails
+  // chunk.find() and is dropped by `!meta`. Both are silent: no error, no
+  // portalCounts key, no trace in the contract. Recording what matched lets us
+  // name what didn't.
+  const matched = new Set();
   for (const r of results) {
     const inputUrl = (r.input && r.input.url) || r.url;
     const meta = chunk.find((c) => c.url === inputUrl || inputUrl?.startsWith(c.url.split("?")[0]));
     if (!meta) continue;
+    matched.add(meta.url);
     const portal = PORTALS[meta.portalKey];
     if (!portal) continue;
     const md = r.markdown || "";
@@ -1319,6 +1740,14 @@ for (let i = 0; i < directFlat.length; i += MAX_BATCH) {
       continue;
     }
     ingestJobs(portal.extract(md, inputUrl, html, meta.role, meta.country), meta);
+  }
+  // Aggregate per portal rather than emitting one error per URL: a whole-tier
+  // outage is 64 lines of identical noise, and ERROR_DETAILS is truncated.
+  const missedByPortal = {};
+  for (const c of chunk) if (!matched.has(c.url)) missedByPortal[c.portalKey] = (missedByPortal[c.portalKey] || 0) + 1;
+  for (const [p, n] of Object.entries(missedByPortal)) {
+    const planned = chunk.filter((c) => c.portalKey === p).length;
+    errors.push(`no_result (${p}): ${n}/${planned} URLs returned no attributable row from the dataset scraper`);
   }
 }
 
@@ -1449,113 +1878,23 @@ if (enrichmentQueue.length > 0) {
 // from the SEARCH meta, so a Xing job found under a "UK" query gets mis-tagged
 // UK (the source of APP-2557/2196/2198/2204/2207/2242). Override from the URL
 // city for those boards. cv/writing-eval.mjs COUNTRY_SUSPECT is the back-stop.
-function dachCountryFromUrl(url) {
-  const u = (url || "").toLowerCase();
-  if (/\b(z[uü]rich|zuerich|zurich|basel|bern|genf|geneva|gen[eè]ve|lausanne|lugano|winterthur|\bzug\b)\b/.test(u)) return "Switzerland";
-  if (/\b(wien|vienna|graz|linz|salzburg|innsbruck|klagenfurt)\b/.test(u)) return "Austria";
-  return "Germany";
-}
-// Fold any country onto the canonical Notion Country select options. Anything not
-// an explicit option — France, Poland, Italy, Belgium, Portugal, … — buckets into
-// "EU (other)" (the exact city still lives in the Location field). Map is
-// function-local so an early `--self-test` calling resolveCountry can't TDZ.
-function normCountry(c) {
-  if (!c) return c;
-  const OPT = {
-    "uk": "UK", "united kingdom": "UK", "great britain": "UK", "england": "UK",
-    "scotland": "UK", "wales": "UK", "northern ireland": "UK",
-    "germany": "Germany", "deutschland": "Germany",
-    "austria": "Austria", "switzerland": "Switzerland",
-    "netherlands": "Netherlands", "holland": "Netherlands",
-    "ireland": "Ireland", "spain": "Spain", "remote": "Remote", "other": "Other",
-  };
-  const k = String(c).toLowerCase().trim();
-  return OPT[k] || "EU (other)";
-}
-// Derive the true country from the posting's Location string ("Amsterdam,
-// Netherlands", "London, United_Kingdom", "Munich, Bavaria, Germany", "Dublin,
-// Ireland", or a bare city like "Warsaw"). Explicit country name wins; else a
-// known city; else null (caller keeps the search-query country).
-function countryFromLocation(loc) {
-  if (!loc) return null;
-  const s = " " + String(loc).toLowerCase().replace(/_/g, " ") + " ";
-  const NAMES = ["united kingdom", "great britain", "northern ireland", "netherlands", "switzerland", "germany", "deutschland", "austria", "ireland", "france", "spain", "italy", "belgium", "poland", "portugal", "sweden", "denmark", "norway", "finland", "luxembourg", "romania", "england", "scotland", "wales", "uk"];
-  for (const n of NAMES) { if (new RegExp("[^a-z]" + n + "[^a-z]").test(s)) return normCountry(n); }
-  const CITY = {
-    Germany: ["berlin", "munich", "münchen", "hamburg", "frankfurt", "cologne", "köln", "stuttgart", "düsseldorf", "dusseldorf", "leipzig", "dresden", "nuremberg", "nürnberg", "karlsruhe", "mannheim", "hannover"],
-    UK: ["london", "manchester", "edinburgh", "leeds", "birmingham", "bristol", "cambridge", "glasgow", "reading", "oxford", "sheffield", "liverpool", "nottingham", "cardiff", "belfast", "brighton", "newcastle", "jersey", "birkenhead"],
-    Netherlands: ["amsterdam", "utrecht", "rotterdam", "eindhoven", "the hague", "den haag"],
-    France: ["paris", "lyon", "toulouse", "lille", "nantes", "bordeaux"],
-    Ireland: ["dublin", "cork", "galway", "limerick"],
-    Austria: ["vienna", "wien", "graz", "linz", "salzburg", "innsbruck"],
-    Switzerland: ["zurich", "zürich", "geneva", "basel", "bern", "lausanne", "zug", "winterthur"],
-    Spain: ["madrid", "barcelona", "valencia", "málaga", "malaga", "sevilla", "seville"],
-    Italy: ["milan", "milano", "rome", "roma", "turin", "torino"],
-    Belgium: ["brussels", "antwerp", "ghent"],
-    Poland: ["warsaw", "krakow", "kraków", "wroclaw", "gdansk"],
-  };
-  for (const [country, cities] of Object.entries(CITY)) {
-    for (const city of cities) { if (new RegExp("[^a-zà-ÿ]" + city + "[^a-zà-ÿ]").test(s)) return normCountry(country); }
-  }
-  return null;
-}
-function resolveCountry(job) {
-  const c = job._country;
-  // DACH-exclusive boards (Xing / StepStone-DE): the URL city is authoritative,
-  // regardless of which query surfaced the row.
-  if (/xing\.com|stepstone\.de/i.test(job.url || "") && !/^(Germany|Austria|Switzerland)$/i.test(c || "")) {
-    return normCountry(dachCountryFromUrl(job.url));
-  }
-  // Otherwise the posting's actual location beats the search-query country: a
-  // "Germany" query surfacing a Dublin role must land as Ireland, not Germany
-  // (fixes the Stripe/Wheely/Lendable/… mis-tags). Unknown location → keep query.
-  return normCountry(countryFromLocation(job.location) || c);
-}
-
-// ─── Write to Notion (Stage 1) ───────────────────────────────────────────
+// ─── Country + position + Stage-1 write: SHARED, see notion-stage1.mjs ───
+// These six functions (dachCountryFromUrl, normCountry, countryFromLocation,
+// resolveCountry, inferPosition, notionCreatePage) lived here and ONLY here,
+// which is why morning-scan had no way to write a Stage-1 row and silently
+// dropped every hit it found for weeks. Moved verbatim to notion-stage1.mjs on
+// 2026-08-11 so both scanners tag Country and Position identically. Editing a
+// private copy here would reintroduce exactly the drift that
+// [[country-from-location-not-query]] documents - change the shared module.
 async function notionCreatePage(job) {
-  const props = {
-    "Company": { title: [{ text: { content: (job.company || "Undisclosed").slice(0, 200) } }] },
-    "Position": { multi_select: inferPosition(job.title || job._role).map(name => ({ name })) },
-    "Job URL": { url: job.url.slice(0, 1990) },
-    "Country": { select: { name: resolveCountry(job) } },
-    "Location": { rich_text: [{ text: { content: (job.location || "").slice(0, 200) } }] },
-    "Source portal": { select: { name: job.source_portal } },
-    "Stage": { select: { name: "1. Discovered" } },
-    "Company tier": { select: { name: "Tier 3" } },
-    "Agent run ID": { rich_text: [{ text: { content: `bd-bulk-scan-${new Date().toISOString().slice(0,16).replace(/[:T-]/g,"-")}` } }] },
-    "Discovered date": { date: { start: new Date().toISOString().slice(0,10) } },
-    "Fit notes": { rich_text: [{ text: { content:
-        `[bd-bulk-scan] portal=${job.source_portal} title=${job.title || "(unknown)"}` +
-        (job.posted_time ? ` posted=${job.posted_time}` : "") +
-        (job.applicant_count != null ? ` apps=${job.applicant_count}` : "") +
-        (job.employment_type ? ` type=${job.employment_type}` : "") +
-        (job.easy_apply ? " easy_apply" : "") +
-        (job.jd_summary ? `\n\nJD: ${job.jd_summary.slice(0, 1500)}` : "")
-    } }] },
-  };
-  const r = await fetch("https://api.notion.com/v1/pages", {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${NOTION_TOKEN}`, "Notion-Version": "2022-06-28", "Content-Type": "application/json" },
-    body: JSON.stringify({ parent: { database_id: DATABASE_ID }, properties: props }),
+  return createStage1Row(job, {
+    notionToken: NOTION_TOKEN,
+    databaseId: DATABASE_ID,
+    scanner: 'bd-bulk-scan',
   });
-  if (!r.ok) throw new Error(`Notion ${r.status}: ${(await r.text()).slice(0,200)}`);
 }
-
-function inferPosition(title) {
-  const t = (title || "").toLowerCase();
-  const positions = [];
-  if (t.includes("analytics engineer") || t.includes("analytics engineering")) positions.push("Analytics Engineer");
-  if (t.includes("data scientist") || t.includes("decision scientist") || t.includes("applied scientist")) positions.push("Data Scientist");
-  if (t.includes("data engineer") || t.includes("dateningenieur")) positions.push("Data Engineer");
-  if (t.includes("data analyst") || t.includes("datenanalyst")) positions.push("Data Analyst");
-  if (t.includes("bi engineer") || t.includes("business intelligence")) positions.push("BI Engineer");
-  if (t.includes("ml engineer") || t.includes("machine learning")) positions.push("ML Engineer");
-  if (positions.length === 0) positions.push("Analytics Engineer"); // safe default
-  return [...new Set(positions)];
-}
-
-// ── Xing JD enrichment + syndication fold ────────────────────────────────
+// ─── Pre-Notion clean gate: in-batch branch dedup ────────────────────────
+// ── Xing JD enrichment + syndication fold (2026-07-13) ───────────────────────
 // The Xing SEARCH page only exposes a slug-derived title + "Undisclosed (Xing)"
 // company — low-signal for eval AND unable to dedup staffing-agency syndication
 // (one client role posted across dozens of city-slug URLs as distinct listings).
@@ -1597,7 +1936,34 @@ function inferPosition(title) {
   }
 }
 
-// ─── Pre-Notion clean gate: in-batch branch dedup ────────────────────────
+// Freshness post-filter — the backstop for portals fetched by their own URLs
+// (stepstone, xing, careerbee, efc, sponsoredjobs), which have no query
+// operator we can set without risking a silent zero-yield. Runs over every
+// portal so the SERP ones get a second check on their enriched posted dates.
+// Jobs with no readable date are kept; the kept-unknown count is printed and
+// put in the contract so a portal that stops emitting dates is visible rather
+// than quietly turning the filter off.
+let freshnessDropped = 0, freshnessUnknown = 0;
+if (WINDOW_HOURS) {
+  const before = allJobs.length;
+  const { fresh, stale, unknown } = partitionByFreshness(allJobs, WINDOW_HOURS, RUN_STARTED_ISO);
+  freshnessDropped = stale.length;
+  freshnessUnknown = unknown.length;
+  const staleByPortal = {};
+  for (const j of stale) staleByPortal[j.source_portal || "?"] = (staleByPortal[j.source_portal || "?"] || 0) + 1;
+  allJobs.length = 0;
+  allJobs.push(...fresh);
+  const wm = readWatermark();
+  console.error(
+    `bd-bulk-scan: freshness window ${WINDOW_HOURS}h (` +
+    `${wm ? `since last scan ${wm.last_scan_iso}` : "no watermark — first run, 24h default"}): ` +
+    `dropped ${freshnessDropped} stale (${before} → ${allJobs.length}), kept ${freshnessUnknown} undated` +
+    (freshnessDropped ? ` | stale by portal: ${Object.entries(staleByPortal).map(([k, v]) => `${k}:${v}`).join(",")}` : ""),
+  );
+} else {
+  console.error("bd-bulk-scan: --no-freshness — scanning full history, watermark NOT advanced");
+}
+
 const beforeCollapse = allJobs.length;
 const cleanJobs = collapseBranchDupes(allJobs);
 const branchCollapsed = beforeCollapse - cleanJobs.length;
@@ -1623,6 +1989,26 @@ if (NO_WRITE) {
 const elapsed = ((Date.now() - start) / 1000).toFixed(1);
 const portalBreakdown = Object.entries(portalCounts).map(([k,v]) => `${k}:${v}`).join(",");
 
+// Advance the watermark only on a run that actually reached the portals and
+// was allowed to write. Advancing after a fetch outage would silently skip
+// whatever was posted during it; leaving it put makes the NEXT run widen its
+// window to cover the gap instead.
+let watermarkAdvanced = false;
+if (WINDOW_HOURS && !NO_WRITE && flat.length > 0 && writeFails === 0) {
+  writeWatermark(RUN_STARTED_ISO, {
+    window_hours_used: WINDOW_HOURS,
+    urls_fetched: flat.length,
+    jobs_found: cleanJobs.length,
+    note: "Set by bd-bulk-scan after a successful run; the next run scans forward from here.",
+  });
+  watermarkAdvanced = true;
+} else if (WINDOW_HOURS && !NO_WRITE) {
+  console.error(
+    `bd-bulk-scan: watermark NOT advanced (urls_fetched=${flat.length}, write_failures=${writeFails}) — ` +
+    "next run will widen its window to cover this gap",
+  );
+}
+
 console.log("\n--- ROUTINE_CONTRACT ---");
 console.log("ROUTINE: bd-bulk-scan");
 console.log(`TIMESTAMP_UTC: ${new Date().toISOString()}`);
@@ -1632,9 +2018,12 @@ console.log(`JOBS_AFTER_FILTER: ${allJobs.length}`);
 console.log(`BRANCH_COLLAPSED: ${branchCollapsed}`);
 console.log(`JOBS_FOUND: ${cleanJobs.length}`);
 console.log(`JOBS_PER_PORTAL: ${portalBreakdown}`);
+console.log(`FRESHNESS_WINDOW_HOURS: ${WINDOW_HOURS ?? "off"}`);
+console.log(`FRESHNESS_DROPPED_STALE: ${freshnessDropped}`);
+console.log(`FRESHNESS_KEPT_UNDATED: ${freshnessUnknown}`);
+console.log(`WATERMARK_ADVANCED: ${watermarkAdvanced}`);
 console.log(`NOTION_ROWS_WRITTEN: ${written}`);
 console.log(`NOTION_WRITE_FAILURES: ${writeFails}`);
-console.log(`CROSS_PORTAL_SKIPPED: ${crossPortalSkipped}`);
 console.log(`SEEN_CACHE_SIZE: ${seen.size}`);
 console.log(`ELAPSED_SEC: ${elapsed}`);
 console.log(`ERRORS: ${errors.length}`);

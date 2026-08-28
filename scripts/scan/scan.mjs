@@ -33,7 +33,7 @@ import path from 'path';
 import yaml from 'js-yaml';
 
 import { makeHttpCtx } from '../../providers/_http.mjs';
-import { loadTaxonomy, deriveTitleFilter } from './role-taxonomy.mjs';
+import { loadTaxonomy, deriveTitleFilter, matchNegative } from './role-taxonomy.mjs';
 
 const parseYaml = yaml.load;
 
@@ -45,6 +45,7 @@ const PIPELINE_PATH = 'data/pipeline.md';
 const APPLICATIONS_PATH = 'data/applications.md';
 const SCAN_FAILURES_PATH = 'data/scan-failures.json';
 const STALE_THRESHOLD = 3;  // ≥ this many consecutive failures → flagged stale
+// scripts/scan/scan.mjs -> providers/ lives two levels up at the repo root.
 const PROVIDERS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'providers');
 
 // Ensure required directories exist (fresh setup)
@@ -123,13 +124,20 @@ function resolveProvider(entry, providers, { skipIds = [] } = {}) {
 
 function buildTitleFilter(titleFilter) {
   const positive = (titleFilter?.positive || []).map(k => k.toLowerCase());
-  const negative = (titleFilter?.negative || []).map(k => k.toLowerCase());
+  // Negative matching is delegated to matchNegative() so this scanner and
+  // bd-bulk-scan apply the taxonomy identically. This used to substring-match
+  // EVERY negative term, which dropped legitimate rows: "International Data
+  // Analyst" matched the "Intern" exclusion. Word boundaries now guard the
+  // English terms while the German ones stay substring (see role-taxonomy.yml).
+  const spec = {
+    negative: titleFilter?.negative || [],
+    negativeSubstring: titleFilter?.negativeSubstring || [],
+  };
 
   return (title) => {
-    const lower = title.toLowerCase();
+    const lower = String(title || '').toLowerCase();
     const hasPositive = positive.length === 0 || positive.some(k => lower.includes(k));
-    const hasNegative = negative.some(k => lower.includes(k));
-    return hasPositive && !hasNegative;
+    return hasPositive && !matchNegative(title, spec);
   };
 }
 
@@ -187,12 +195,13 @@ function canonicalUrl(u) {
   if (!u) return '';
   let s;
   try { s = decodeURIComponent(u); } catch { s = u; }
+  s = s.split('#')[0];
   // The job id lives in the QUERY STRING for some portals (Civil Service
   // jobs.cgi?jcode=…, Indeed viewjob?jk=…). Capture it before dropping the
   // query, else every distinct vacancy collapses to the same base path and is
-  // wrongly deduped. Other tracking params (?rltr=, ?lang=) still get stripped.
+  // wrongly deduped (found 2026-07-20). Tracking params (?rltr=, ?lang=) still
+  // get stripped.
   const idMatch = s.match(/[?&](jcode|jk)=([A-Za-z0-9]+)/i);
-  s = s.split('#')[0];
   s = s.split('?')[0];
   s = s.toLowerCase();
   s = s.replace(/\/+$/, '');
@@ -490,7 +499,7 @@ async function main() {
 
   // 3. Resolve a provider for each enabled company
   const targets = [];
-  let skippedCount = 0;
+  const skipped = [];
   const resolveErrors = [];
   for (const company of companies) {
     if (!company || typeof company !== 'object') continue;
@@ -501,13 +510,21 @@ async function main() {
     }
     if (filterCompany && !company.name.toLowerCase().includes(filterCompany)) continue;
     const resolved = resolveProvider(company, providers);
-    if (!resolved) { skippedCount++; continue; }
+    if (!resolved) { skipped.push(company.name); continue; }
     if (resolved.error) { resolveErrors.push({ company: company.name, error: resolved.error }); continue; }
     targets.push({ ...company, _provider: resolved.provider });
   }
 
   const localParserCount = targets.filter(t => t._provider.id === 'local-parser').length;
-  console.log(`Scanning ${targets.length} companies via providers (${localParserCount} local parser; ${skippedCount} skipped — no provider matched)`);
+  console.log(`Scanning ${targets.length} companies via providers (${localParserCount} local parser; ${skipped.length} skipped — no provider matched)`);
+  // Name the skipped entries rather than only counting them. A bare count reads
+  // as a tolerable rounding error; the names make it obvious when a tracked
+  // company silently contributes nothing. These never reach the failure ledger
+  // (they are never attempted, so they cannot "fail"), so this line is the only
+  // place they surface at all.
+  if (skipped.length) {
+    console.log(`  ↳ no provider matched: ${skipped.join(', ')}`);
+  }
   if (dryRun) console.log('(dry run — no files will be written)\n');
 
   // 4. Load dedup sets
@@ -680,6 +697,36 @@ async function main() {
   console.log(`STALE_COMPANIES: ${stale.map(s => `${s.name}(${s.consecutive})`).join(', ') || 'none'}`);
   console.log("--- END_SCAN_CONTRACT ---");
 
+  // --emit-json <path>: write the surviving hits as machine-readable JSON so a
+  // pure-node writer can insert them (2026-08-11).
+  //
+  // Until now the ONLY structured outputs were pipeline.md (markdown prose) and
+  // scan-history.tsv (no location field), so the routine prompt had to insert
+  // rows itself via the Notion MCP — which `--strict-mcp-config` removes from
+  // scheduled runs. The result: morning-scan found hits on 08-05 and 08-10 and
+  // wrote ZERO rows, every run, because it structurally could not. This file is
+  // the handoff that lets notion-scan-write.mjs do it over REST instead.
+  const emitPath = (() => {
+    const i = process.argv.indexOf('--emit-json');
+    return i >= 0 ? process.argv[i + 1] : null;
+  })();
+  if (emitPath) {
+    try {
+      writeFileSync(emitPath, JSON.stringify({
+        generated_at: new Date().toISOString(),
+        scanner: 'scan.mjs',
+        hits: verifiedOffers.map(o => ({
+          company: o.company, title: o.title, url: o.url,
+          location: o.location || '', source_portal: o.source_portal || 'ATS API',
+          posted_time: o.posted_time || o.posted || null,
+        })),
+      }, null, 2));
+      console.log(`EMITTED_JSON: ${emitPath} (${verifiedOffers.length} hits)`);
+    } catch (e) {
+      console.error(`EMIT_JSON_FAILED: ${e.message}`);
+    }
+  }
+
   if (verifiedOffers.length > 0) {
     console.log('\nNew offers:');
     for (const o of verifiedOffers) {
@@ -692,7 +739,7 @@ async function main() {
     }
   }
 
-  console.log(`\n→ Run /applyd pipeline to evaluate new offers.`);
+  console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);
   console.log('→ Share results and get help: https://discord.gg/8pRpHETxa4');
 }
 
