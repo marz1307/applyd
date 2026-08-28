@@ -4,12 +4,21 @@
 // file with YAML frontmatter (backend metadata) + recruiter-facing body
 // (only ### questions and their answers). Hard separation rule: nothing
 // backend-y ever leaks into the body.
-//
-// Angle evidence rotates across JD-specific technical questions — same angle
-// is never used twice in the same file.
 'use strict';
-// draft.js was retired 2026-07-01; posted-band helpers live in draft-v2 now.
 const { detectPostedBand, clampToBand } = require('./draft-v2');
+
+// ── Seniority detection ───────────────────────────────────────
+// Graduate/junior postings need a different framing (mentorship-forward vs
+// production-ownership-forward). Detected from JD text or supplied
+// explicitly by the caller.
+const GRAD_SIGNALS = /\b(graduate|grad\b|entry[- ]level|junior|trainee|werkstudent|praktikant|apprentice|new grad|recent grad|class of|programme 202|program 202|early career)\b/i;
+function detectSeniority(jdText, roleTitle, explicit) {
+  if (explicit) return explicit;
+  const t = (jdText || '') + ' ' + (roleTitle || '');
+  if (GRAD_SIGNALS.test(t)) return 'graduate';
+  if (/\b(senior|staff|principal|lead|head of|director|vp)\b/i.test(t)) return 'senior';
+  return 'mid';
+}
 
 // ── Question detection ──────────────────────────────────────────
 // Logistics questions are always included. JD-specific are inferred
@@ -64,11 +73,9 @@ function deriveJdQuestions(jdText, matchBrief) {
   for (const re of expPatterns) {
     for (const m of t.matchAll(re)) {
       let anchor = m[1].split(/[.;,]/)[0].trim();
-      // Strip trailing phrases like "for X", "in production", "and Y"
       anchor = anchor.replace(/\s+(for|in production|and\s+\w+|under\s+\w+)\s.*$/i, '').trim();
       if (anchor.length < 3 || anchor.length > 60) continue;
       if (REJECT_ANCHOR.test(anchor)) continue;
-      // Must contain a capitalised word (proper noun / tech term) OR be a known tech
       const hasTech = /\b(SQL|Python|Java|R|Go|Rust|Scala|TypeScript|JavaScript|FastAPI|dbt|Airflow|Dagster|Kafka|Spark|Snowflake|BigQuery|Databricks|PostgreSQL|MySQL|MongoDB|Redis|Docker|Kubernetes|Terraform|AWS|GCP|Azure|MLflow|XGBoost|SHAP|Tableau|Looker|Power BI)\b/i.test(anchor);
       const hasProperNoun = /\b[A-Z][a-zA-Z]{2,}/.test(anchor);
       if (!hasTech && !hasProperNoun) continue;
@@ -85,9 +92,6 @@ function deriveJdQuestions(jdText, matchBrief) {
     }
   }
   // Last-resort fallback when no anchors can be pulled from JD or match brief.
-  // Inject 3 role-appropriate technical questions so the form still has
-  // jd_specific slots. Picked from cv_master.production skills by variant
-  // so each variant gets its strongest production-evidence anchors.
   if (out.length === 0) {
     const variant = (matchBrief.cv_variant || 'ae').toLowerCase();
     const ROLE_FALLBACK_ANCHORS = {
@@ -132,15 +136,18 @@ function pickAngleForQuestion(anchor, used) {
     scores[angle] = kws.reduce((acc, k) => acc + (t.includes(k) ? 1 : 0), 0);
   }
   const ordered = Object.entries(scores).sort((a, b) => b[1] - a[1]).map(([a]) => a);
-  // Skip already-used angles
   for (const a of ordered) if (!used.has(a)) return a;
-  // All 6 used; recycle the highest-scoring
   return ordered[0];
 }
 
 // ── Per-question answer composers ─────────────────────────────
 // Visa/eligibility answers — reads work_eligibility from config/profile.yml.
 // Generates market-appropriate answers based on the candidate's actual status.
+//
+// Naming the BASIS matters, not just the fact. "UK resident" is not a legal
+// right-to-work category, and a screener ticking a compliance box has been
+// known to record it as "candidate stated no right to work in the UK". Name
+// the visa/route in the profile summary so this line closes the question.
 function loadWorkEligibility() {
   try {
     const raw = require('node:fs').readFileSync(
@@ -161,47 +168,55 @@ const _ELIG = loadWorkEligibility();
 
 function visaAnswer(country) {
   const c = (country || '').toLowerCase();
+  const cap = c.charAt(0).toUpperCase() + c.slice(1);
   const residence = _ELIG.residence || 'Current residence';
   if (/united kingdom|^uk$|england|scotland|wales|northern ireland/i.test(c)) {
     if (_ELIG.needsUkSponsorship) return 'UK Skilled Worker visa sponsorship required.';
     return _ELIG.summary || `${residence} resident with right to work in the UK. No sponsorship required.`;
   }
+  // Ireland: the Common Travel Area does NOT extend work rights to
+  // non-British/non-Irish citizens. If your route runs through a national
+  // permit, name it explicitly in the profile summary.
   if (/^ireland$|^ie$/i.test(c)) {
     return `${residence} resident. Happy to confirm work authorisation for Ireland per the applicable route.`;
   }
-  if (/germany|austria|switzerland|netherlands|france|spain|portugal|italy|sweden|denmark|norway|belgium|luxembourg|finland|poland|czech|hungary/i.test(c)) {
-    const countryName = c.charAt(0).toUpperCase() + c.slice(1);
-    return `For a ${countryName} role I would apply via the ${_ELIG.euRoute} route. No sponsorship cost to the employer beyond the standard right-to-work attestation.`;
+  // CH / DK / NO are Blue Card non-participants (CH outside the EU; DK opted
+  // out; NO is EEA). Honest route is the national permit, not the Blue Card.
+  if (/switzerland|^ch$|denmark|^dk$|norway|^no$/i.test(c)) {
+    return `${residence} resident. A ${cap} role would run through the national employment-permit route for qualified specialists — employer-initiated but low-overhead, with no UK-style sponsorship licence.`;
+  }
+  if (/germany|austria|netherlands|france|spain|portugal|italy|sweden|belgium|luxembourg|finland|poland|czech|hungary/i.test(c)) {
+    return `For a ${cap} role I would apply via the ${_ELIG.euRoute} route. No sponsorship cost to the employer beyond the standard right-to-work attestation.`;
   }
   return `Happy to confirm work authorisation per the contracting country; ${_ELIG.euRoute} route available if relocation becomes part of the role.`;
 }
 
-function whyCompany({ brief, factsPicked }) {
+function whyCompany({ brief, factsPicked, seniority }) {
+  const isGrad = seniority === 'graduate' || seniority === 'junior';
   if (!factsPicked.length) {
-    // Honest fallback — don't fabricate. Anchor on JD itself.
+    if (isGrad) {
+      return `The role interests me because ${brief.job_title || 'it'} sits inside a team where I can learn from experienced engineers while contributing real work. I chose to apply here specifically rather than broadly because the way the role is described tells me the team values both rigour and mentorship.`;
+    }
     return `The role description names ${brief.job_title || 'the seat'} and the team's focus, which is what I look for in my next move. The way the role is framed tells me the team values the same priorities I bring to data work.`;
   }
   const f1 = factsPicked[0];
-  // Sentence 1: the specific fact (cleaned of trailing period for joining)
   const s1 = f1.fact.replace(/\.$/, '').trim() + '.';
-  // Sentence 2: connect to CV evidence (production work — read from cv.md)
-  const s2 = `That overlaps directly with my production experience: building data layers end to end, with internal product surfaces alongside the warehouse and CI-gated correctness throughout.`;
-  // Sentence 3 (optional): second concrete fact, as its own sentence
+  const connect = isGrad
+    ? 'What interests me is the chance to apply my production experience inside this specific environment, with structured mentorship while I build depth.'
+    : 'That overlaps directly with my production experience: building data layers end to end, with internal product surfaces alongside the warehouse and CI-gated correctness throughout.';
   let s3 = '';
   if (factsPicked.length > 1) {
     const f2 = factsPicked[1].fact.trim().replace(/\.$/, '') + '.';
     s3 = ` ${f2} The fit is specific rather than generic.`;
   }
-  return `${s1} ${s2}${s3}`.trim();
+  return `${s1} ${connect}${s3}`.trim();
 }
 
-function whyRole({ brief, matchBrief }) {
+function whyRole({ brief, matchBrief, seniority }) {
+  const isGrad = seniority === 'graduate' || seniority === 'junior';
   const variantLabel = { ae: 'Analytics Engineer', ds: 'Data Scientist', de: 'Data Engineer', da: 'Data Analyst', me: 'Machine Learning Engineer' }[matchBrief.cv_variant] || 'data role';
   const jdSignal = brief.job_title || `${variantLabel} role`;
-  // Sentence 1: role-specific signal from JD
-  // Sentence 2: explicit connection to a CV evidence point (read from cv.md)
-  // Sentence 3: forward-looking
-  const angle = matchBrief.employer_angle || 'modelling';
+  const angle = matchBrief.employer_angle || matchBrief.experience_angle || 'modelling';
   const evidenceMap = {
     modelling: 'In my most recent role I built dimensional models across staging, intermediate, and marts layers on a deduplicated entity spine; that is the muscle the role is asking for.',
     infrastructure: 'I cut daily pipeline compute significantly through incremental modelling on an append-only raw layer; the cost-and-correctness frame here is what I want to bring next.',
@@ -210,13 +225,40 @@ function whyRole({ brief, matchBrief }) {
     attribution: 'I designed a deterministic classification chain that closed outstanding findings in the metrics review; the role asks for similar deterministic business-logic work.',
     sole_owner: 'I was sole architect of the data layer across multiple backend domains with high solo commit share; the ownership scope here maps cleanly.',
   };
-  const s1 = `What pulled me to ${jdSignal} is the combination the role spells out: production data work paired with the specific stack and scope the team owns.`;
   const s2 = evidenceMap[angle] || evidenceMap.modelling;
+  if (isGrad) {
+    const s1 = `The ${jdSignal} is what I want because it pairs real production ownership with structured learning.`;
+    const s3 = 'I did that largely independently; I want the mentorship and cross-team exposure that this role provides, applied to a larger-scale environment.';
+    return `${s1} ${s2} ${s3}`;
+  }
+  const s1 = `What pulled me to ${jdSignal} is the combination the role spells out: production data work paired with the specific stack and scope the team owns.`;
   const s3 = `In the first 90 days I would expect to ship a first end-to-end model into the existing repo, add tests for the gaps I find, and produce a write-up of where I would steer the data layer over the next year.`;
   return `${s1} ${s2} ${s3}`;
 }
 
-// Technical/JD-specific answer composer
+// Skill-evidence mapping. Populate SKILL_EVIDENCE from the candidate's own
+// production references — each entry pairs a specific tool with the lead + body
+// of an answer that draws on their real work. When populated, an "Experience
+// with X" question routes to the correct evidence source instead of whatever
+// angle happens to rotate in. When empty (the default in a fresh clone), the
+// composer falls back to the angle body — same behaviour as the legacy path.
+const SKILL_EVIDENCE = {
+  // Example (fill from cv.md / article-digest.md):
+  //   dbt: {
+  //     lead: 'dbt is my core transformation tool with production depth.',
+  //     body: 'On the most recent build I authored [N] models across staging, intermediate, and marts...',
+  //   },
+};
+
+function matchSkillEvidence(anchor) {
+  const a = (anchor || '').toLowerCase();
+  if (SKILL_EVIDENCE[a]) return SKILL_EVIDENCE[a];
+  for (const [key, val] of Object.entries(SKILL_EVIDENCE)) {
+    if (a.includes(key)) return val;
+  }
+  return null;
+}
+
 // Angle evidence for form answers — populated from cv.md and article-digest.md.
 // Each entry should describe the candidate's strongest production evidence for
 // the given angle. Replace the generic text below with actual experience.
@@ -230,24 +272,35 @@ const ANGLE_BODY_FOR_FORM = {
 };
 
 function technicalAnswer({ question, angle, matchBrief }) {
-  const angleBody = ANGLE_BODY_FOR_FORM[angle] || ANGLE_BODY_FOR_FORM.modelling;
   const anchor = question.jd_anchor || question.label;
-  // Lead: connect anchor to evidence. Body: angle. Close: forward-looking note.
-  const lead = `On ${anchor}, my hands-on experience comes through production work in my previous roles and academic research, plus side-project depth where relevant.`;
-  // Honest gap if flagged for this question
-  let gap = '';
+  const matched = matchSkillEvidence(anchor);
   const gaps = matchBrief.match_summary?.gaps || [];
+  let gap = '';
   for (const g of gaps) {
     if (anchor.toLowerCase().includes(g.jd_term.toLowerCase())) {
       gap = ` I am honest about the gap: I have not worked hands-on with ${g.jd_term} in production. My modelling and engineering substrate carries across, and I would expect to be productive within the first sprint.`;
       break;
     }
   }
+  if (matched) return `${matched.lead} ${matched.body}${gap}`;
+  const angleBody = ANGLE_BODY_FOR_FORM[angle] || ANGLE_BODY_FOR_FORM.modelling;
+  const lead = `On ${anchor}, my hands-on experience comes through production work in my previous roles and academic research, plus side-project depth where relevant.`;
   return `${lead} ${angleBody}${gap}`;
 }
 
+// Read a bare "key: value" scalar from config/profile.yml. Silent on miss.
+function readProfileString(key) {
+  try {
+    const raw = require('node:fs').readFileSync(
+      require('node:path').join(__dirname, '..', '..', '..', 'config', 'profile.yml'), 'utf8');
+    const m = raw.match(new RegExp(`^\\s*${key}:\\s*"?([^"\\n]+)"?`, 'm'));
+    return m ? m[1].trim() : null;
+  } catch { return null; }
+}
+
 function logisticsAnswer(qId, ctx) {
-  const { matchBrief, country, city, postedBand } = ctx;
+  const { matchBrief, country, city, postedBand, seniority, jdText } = ctx;
+  const isGrad = seniority === 'graduate' || seniority === 'junior';
   const fmt = (n) => n.toLocaleString('en-GB');
   switch (qId) {
     case 'salary': {
@@ -255,18 +308,23 @@ function logisticsAnswer(qId, ctx) {
       const bounded = clampToBand(matchBrief.salary_range, postedBand);
       if (!bounded) return 'Flexible; happy to align with your published band for the role.';
       const cur = bounded.currency === 'GBP' ? '£' : bounded.currency === 'EUR' ? '€' : '$';
+      // A clamp can collapse both ends onto the posted ceiling. "X to X" reads
+      // as an ultimatum rather than a range, so state the single figure.
+      if (bounded.degenerate) {
+        return `${cur}${fmt(bounded.max)} (in line with your published band; happy to discuss the full package).`;
+      }
       return `${cur}${fmt(bounded.min)} to ${cur}${fmt(bounded.max)} (happy to align with your band).`;
     }
     case 'notice_period': {
-      // Read availability from config/profile.yml
-      let avail = 'Available immediately.';
-      try {
-        const raw = require('node:fs').readFileSync(
-          require('node:path').join(__dirname, '..', '..', '..', 'config', 'profile.yml'), 'utf8');
-        const m = raw.match(/notice_period:\s*"?([^"\n]+)"?/);
-        if (m) avail = m[1].trim();
-      } catch { /* use default */ }
-      return avail;
+      // If the JD specifies a start month, echo it back. Otherwise use the
+      // notice_period from profile.yml (falls back to "Available immediately").
+      const startMatch = (jdText || '').match(/\b(start(?:ing)?|from|commencing)\s+(?:in\s+)?((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})/i);
+      const profileNotice = readProfileString('notice_period');
+      if (startMatch) {
+        const tail = profileNotice ? ` ${profileNotice}` : '';
+        return `Available from ${startMatch[2]} as specified in the role.${tail}`;
+      }
+      return profileNotice || 'Available immediately.';
     }
     case 'visa':
       return visaAnswer(country);
@@ -277,30 +335,15 @@ function logisticsAnswer(qId, ctx) {
           ? 'UK Skilled Worker visa sponsorship required.'
           : 'No sponsorship required for UK roles.';
       }
+      if (/switzerland|^ch$|^ireland$|^ie$|denmark|^dk$|norway|^no$/i.test(c)) {
+        return 'The role would run through the national employment-permit route for qualified specialists — employer-initiated but low-overhead, with no UK-style sponsorship licence.';
+      }
       return `No sponsorship cost to the employer beyond the standard right-to-work attestation; ${_ELIG.euRoute} route available.`;
     }
-    case 'years_experience': {
-      // Read experience summary from config/profile.yml
-      let exp = 'See attached CV for full experience details.';
-      try {
-        const raw = require('node:fs').readFileSync(
-          require('node:path').join(__dirname, '..', '..', '..', 'config', 'profile.yml'), 'utf8');
-        const m = raw.match(/years_experience:\s*"?([^"\n]+)"?/);
-        if (m) exp = m[1].trim();
-      } catch { /* use default */ }
-      return exp;
-    }
-    case 'highest_education': {
-      // Read education from config/profile.yml
-      let edu = 'See attached CV for education details.';
-      try {
-        const raw = require('node:fs').readFileSync(
-          require('node:path').join(__dirname, '..', '..', '..', 'config', 'profile.yml'), 'utf8');
-        const m = raw.match(/highest_education:\s*"?([^"\n]+)"?/);
-        if (m) edu = m[1].trim();
-      } catch { /* use default */ }
-      return edu;
-    }
+    case 'years_experience':
+      return readProfileString('years_experience') || 'See attached CV for full experience details.';
+    case 'highest_education':
+      return readProfileString('highest_education') || 'See attached CV for education details.';
     case 'references':
       return 'Available on request.';
     default:
@@ -309,14 +352,14 @@ function logisticsAnswer(qId, ctx) {
 }
 
 // ── Body builder ───────────────────────────────────────────────
-function buildBody({ brief, matchBrief, factsPicked, jdQuestions, country, city, postedBand }) {
+function buildBody({ brief, matchBrief, factsPicked, jdQuestions, country, city, postedBand, seniority, jdText }) {
   const sections = [];
   const usedAngles = new Set();
 
   // Motivation
-  sections.push(`### Why this company?\n\n${whyCompany({ brief, factsPicked })}`);
-  sections.push(`### Why this role?\n\n${whyRole({ brief, matchBrief })}`);
-  usedAngles.add(matchBrief.employer_angle);  // claim the letter's angle so technicals pick others
+  sections.push(`### Why this company?\n\n${whyCompany({ brief, factsPicked, seniority })}`);
+  sections.push(`### Why this role?\n\n${whyRole({ brief, matchBrief, seniority })}`);
+  usedAngles.add(matchBrief.employer_angle || matchBrief.experience_angle);
 
   // JD-specific technical (rotates angles)
   for (const q of jdQuestions) {
@@ -327,7 +370,7 @@ function buildBody({ brief, matchBrief, factsPicked, jdQuestions, country, city,
 
   // Logistics
   for (const q of ALWAYS_LOGISTICS) {
-    sections.push(`### ${q.label}\n\n${logisticsAnswer(q.id, { matchBrief, country, city, postedBand })}`);
+    sections.push(`### ${q.label}\n\n${logisticsAnswer(q.id, { matchBrief, country, city, postedBand, seniority, jdText })}`);
   }
 
   return sections.join('\n\n');
@@ -352,12 +395,14 @@ function scrub(text) {
 }
 
 // ── Main compose ───────────────────────────────────────────────
-function composeForm({ brief, matchBrief, cvMaster, jobUrl, today, country, city, applyUrl, applyChannel, briefPath, matchPath }) {
+function composeForm({ brief, matchBrief, cvMaster, jobUrl, today, country, city, applyUrl, applyChannel, briefPath, matchPath, seniority: explicitSeniority }) {
   const factsPicked = matchBrief.company_facts_to_reference || [];
   const jdText = brief.jd_text || '';
+  const roleTitle = brief.job_title || '';
+  const seniority = detectSeniority(jdText, roleTitle, explicitSeniority);
   const jdQuestions = deriveJdQuestions(jdText, matchBrief);
   const postedBand = matchBrief.posted_band || detectPostedBand(jdText);
-  const body = scrub(buildBody({ brief, matchBrief, factsPicked, jdQuestions, country, city, postedBand }));
+  const body = scrub(buildBody({ brief, matchBrief, factsPicked, jdQuestions, country, city, postedBand, seniority, jdText }));
 
   // YAML frontmatter — backend metadata only
   const fm = [
@@ -373,14 +418,15 @@ function composeForm({ brief, matchBrief, cvMaster, jobUrl, today, country, city
     `cv_variant_attached: ${matchBrief.cv_variant || 'ae'}`,
     `brief_path: ${briefPath || ''}`,
     `match_path: ${matchPath || ''}`,
-    `employer_angle_letter: ${matchBrief.employer_angle || ''}`,
+    `employer_angle_letter: ${matchBrief.employer_angle || matchBrief.experience_angle || ''}`,
     `salary_anchor: ${matchBrief.salary_range?.anchor_key || ''}`,
     `has_gap_disclosure: ${!!matchBrief.has_gap_to_disclose}`,
     `jd_questions_detected: ${jdQuestions.length}`,
+    `seniority: ${seniority}`,
     '---',
   ].join('\n');
 
   return `${fm}\n\n${body}\n`;
 }
 
-module.exports = { composeForm, deriveJdQuestions, scrub };
+module.exports = { composeForm, deriveJdQuestions, scrub, detectSeniority, visaAnswer, matchSkillEvidence };

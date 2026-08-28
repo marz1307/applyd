@@ -8,7 +8,7 @@
 // Usage:
 //   node cover-letters/lib/md-to-pdf.mjs --in <letter.md> [--out <letter.pdf>]
 //   node cover-letters/lib/md-to-pdf.mjs --batch <date>   # all letters dated <date>
-import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join, basename, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -102,7 +102,14 @@ async function renderOne(mdPath, pdfPath) {
     return true;
   } catch (e) { return false; }
   finally {
-    try { require('node:fs').unlinkSync(tmpHtml); } catch {}
+    // `unlinkSync` is IMPORTED, not require()d. This file is ESM, where
+    // `require` is not defined, so the previous form threw a ReferenceError on
+    // every single render — swallowed whole by the bare catch. Scratch .tmp.html
+    // files were therefore never deleted and piled up alongside every sent
+    // letter. A cleanup wrapped in `try/catch {}` that can never succeed looks
+    // exactly like one that always succeeds; keep the catch (a missing file is
+    // fine), but the call inside it has to be reachable.
+    try { unlinkSync(tmpHtml); } catch {}
   }
 }
 
