@@ -1,0 +1,69 @@
+#!/bin/sh
+# Enforce that mirrored files match their live source.
+#
+# Some files a repo version-controls may not LIVE in the repo. A common
+# example is Claude Code scheduled-task skills that live in
+# ~/.claude/scheduled-tasks/, which itself cannot be a git repo (it holds
+# credentials and full session transcripts). So the repo keeps a snapshot,
+# and a snapshot silently drifts: edit the live file, forget to re-copy, and
+# the repo holds something stale that still reads as current.
+#
+# This hook compares what is ABOUT to be committed (the index) against the
+# live file, and blocks if they differ.
+#
+# Populate MIRRORS below with 'source_path|mirror_path' pairs — one per line,
+# using the format `<mirror-path-in-repo>::<live-path-on-disk>`. Empty by
+# default; the hook is a no-op until you add at least one pair.
+#
+# Enable via:
+#   git config core.hooksPath hooks
+#
+# Bypass for one commit with --no-verify (only when you mean it).
+
+set -e
+
+# mirror-path-in-repo :: live-path-on-disk
+# Example (uncomment and edit for your setup):
+#   routines/my-scheduled-task.md::$HOME/.claude/scheduled-tasks/my-scheduled-task/SKILL.md
+MIRRORS=""
+
+# Strip the mirror's provenance header: emit from the first frontmatter
+# fence onward. Robust to the header changing length. Adjust if your mirrors
+# do not begin with a `---` frontmatter fence.
+strip_header() { sed -n '/^---$/,$p'; }
+
+status=0
+
+for pair in $MIRRORS; do
+  [ -n "$pair" ] || continue
+  mirror=${pair%%::*}
+  live=${pair#*::}
+
+  # Not staged and not tracked → nothing to compare.
+  if ! git cat-file -e ":$mirror" 2>/dev/null; then
+    continue
+  fi
+
+  # Live file absent (different machine, fresh clone) → cannot verify.
+  # Warn rather than block; blocking would make the repo uncommittable
+  # anywhere the mirrored source is not installed.
+  if [ ! -f "$live" ]; then
+    printf 'pre-commit: note: %s not found; skipped mirror check for %s\n' "$live" "$mirror" >&2
+    continue
+  fi
+
+  if ! git show ":$mirror" | strip_header | diff -q - "$live" >/dev/null 2>&1; then
+    printf '\npre-commit: MIRROR OUT OF DATE\n' >&2
+    printf '  mirror : %s (staged)\n' "$mirror" >&2
+    printf '  live   : %s\n\n' "$live" >&2
+    printf '  The live file is authoritative. Refresh the mirror, keeping its header:\n\n' >&2
+    printf '    { head -6 %s; cat "%s"; } > /tmp/m && mv /tmp/m %s && git add %s\n\n' \
+      "$mirror" "$live" "$mirror" "$mirror" >&2
+    printf '  Diff (mirror < , live > ):\n' >&2
+    git show ":$mirror" | strip_header | diff - "$live" | head -40 >&2
+    printf '\n' >&2
+    status=1
+  fi
+done
+
+exit $status
