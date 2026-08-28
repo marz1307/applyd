@@ -30,6 +30,7 @@ import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { execSync, execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
+import { pickLatestLog } from './routine-logs-core.mjs';
 
 const ROOT = resolve(import.meta.dirname || '.', '..');
 const ARGS = new Set(process.argv.slice(2));
@@ -64,10 +65,18 @@ function mtime(p) {
 // so the weekly referral scout is not judged by a daily yardstick.
 //   'weekday'  — fires Mon–Fri daily (should run within ~30h on a working day)
 //   'weekly:N' — fires weekly on weekday N (0=Sun..6=Sat); tolerate ~8 days
-//   'manual'   — Cowork-side / not Task-Scheduler-driven; never stale-flagged
+//   'manual'   — not Task-Scheduler-driven; never stale-flagged
+//   'retired'  — deliberately disabled in Task Scheduler; never stale-flagged
+//                and its final log is never re-reported. Keep the entry rather
+//                than deleting it: the row documents that the routine existed
+//                and was retired on purpose, which a missing key would not.
 const ROUTINE_CADENCE = {
   'morning-scan':        'weekday',
-  'lunchtime-scan':      'weekday',
+  // 'lunchtime-scan' is retired once bd-bulk-scan covers its territory. Leave
+  // the row here so a stale WITH_ERRORS log from before the switch cannot
+  // resurface as a false STALE — a warning that trains you to ignore the
+  // report.
+  'lunchtime-scan':      'retired',
   'pace-check':          'weekday',
   'bd-bulk-scan':        'weekday',
   'auto-eval':           'weekday',
@@ -154,22 +163,74 @@ function nonRunGapHours(ref) {
 // Max tolerated age (hours) before a routine is STALE, given its cadence and
 // the non-working days immediately behind `ref`. null => never stale (manual).
 function maxAgeHours(cadence, ref) {
-  if (cadence === 'manual') return null;
+  if (cadence === 'manual' || cadence === 'retired') return null;
   const base = cadence.startsWith('weekly') ? 24 * 8 : 30;
   return Math.round(base + nonRunGapHours(ref));
+}
+
+/**
+ * The apply-date guard is emitted by batch/stage-sync-applied.mjs (see
+ * APPLY_DATE_RESCUE line). Apply dates are only ever captured by that guard;
+ * if the drain still emits a valid contract but the guard has silently
+ * stopped reporting, dates start disappearing again with nothing announcing
+ * it.
+ *
+ * Reads `drain-auto-draft-*.log` deliberately. routineHealth() matches on
+ * `auto-draft-` and so never sees these, which is correct — they are the
+ * wrapper's logs, not the routine's.
+ */
+function applyDateRescueHealth(logsDir, files, mtimeMs, ref) {
+  const latest = pickLatestLog(files, mtimeMs, 'drain-auto-draft-');
+  if (!latest) return { checked: false, reason: 'no drain log on disk' };
+  const ts = mtime(join(logsDir, latest));
+  const ageH = ts ? (ref - ts) / 3_600_000 : null;
+  // Do NOT alert on an old drain log. A weekend or bank-holiday gap would
+  // otherwise raise this every Monday — the exact false-alarm class the
+  // cadence logic exists to kill. Staleness of the drain itself is already
+  // the auto-draft routine's own STALE check; this one is only about whether
+  // a run that DID happen reported the rescue.
+  const maxAge = maxAgeHours('weekday', ref);
+  if (ageH !== null && maxAge !== null && ageH > maxAge) {
+    return { checked: false, reason: `newest drain log is ${Math.round(ageH)}h old`, log: latest };
+  }
+
+  const content = readFileSafe(join(logsDir, latest)) || '';
+  const line = content.match(/^.*APPLY_DATE_RESCUE:.*$/m);
+  if (!line) {
+    return {
+      checked: true, missing: true, failed: null, log: latest,
+      age_hours: ageH === null ? null : Math.round(ageH * 10) / 10,
+    };
+  }
+  const failedMatch = line[0].match(/(\d+)\s+failed/);
+  return {
+    checked: true, missing: false,
+    failed: failedMatch ? parseInt(failedMatch[1], 10) : null,
+    log: latest, age_hours: ageH === null ? null : Math.round(ageH * 10) / 10,
+  };
 }
 
 function routineHealth() {
   const logsDir = join(ROOT, 'data', 'routine-logs');
   const files = listDir(logsDir);
+  // pickLatestLog needs mtimes to break sibling-log ties (some routines write
+  // multiple files per run and lexicographic sort disagrees with wall-clock).
+  const _mtimeCache = {};
+  for (const f of files) {
+    const s = safe(() => statSync(join(logsDir, f)), null);
+    if (s) _mtimeCache[f] = s.mtimeMs;
+  }
+  const mtimeMs = (f) => _mtimeCache[f] || 0;
   const out = {};
 
   for (const r of ROUTINES) {
-    const matching = files.filter((f) => f.startsWith(r + '-')).sort();
-    if (matching.length === 0) {
-      // Manual (Cowork-side) routines aren't scheduled here, so absence is not
-      // a fault — mark MANUAL (grey, non-alerting) rather than NEVER_RUN.
-      const absent = ROUTINE_CADENCE[r] === 'manual' ? 'MANUAL' : 'NEVER_RUN';
+    const latestLog = pickLatestLog(files, mtimeMs, r + '-');
+    if (!latestLog) {
+      // Non-scheduled routines are not a fault. Manual/retired go grey and
+      // never stale-flag: MANUAL is Cowork-side, RETIRED means we
+      // deliberately took the routine out of Task Scheduler.
+      const nonScheduled = ROUTINE_CADENCE[r] === 'manual' || ROUTINE_CADENCE[r] === 'retired';
+      const absent = nonScheduled ? (ROUTINE_CADENCE[r] === 'retired' ? 'RETIRED' : 'MANUAL') : 'NEVER_RUN';
       out[r] = {
         last_run: null, age_hours: null, max_age_h: null,
         cadence: ROUTINE_CADENCE[r], status: absent, contract_pass: null,
@@ -177,7 +238,7 @@ function routineHealth() {
       };
       continue;
     }
-    const latest = matching[matching.length - 1];
+    const latest = latestLog;
     const fullPath = join(logsDir, latest);
     const content = readFileSafe(fullPath) || '';
     // Contract is "passed" if the wrapper recorded CONTRACT_VALID: True
@@ -203,6 +264,11 @@ function routineHealth() {
     // cadence- and holiday-aware (see maxAgeHours), not a flat 48h.
     const maxAge = maxAgeHours(ROUTINE_CADENCE[r], now);
     if (status === 'OK' && ageH !== null && maxAge !== null && ageH > maxAge) status = 'STALE';
+    // A retired routine still has its FINAL log on disk, so the content-derived
+    // status above would keep re-alerting on it forever. Override once we've
+    // read the log — content is still recorded (for provenance), status is
+    // downgraded to RETIRED.
+    if (ROUTINE_CADENCE[r] === 'retired') status = 'RETIRED';
 
     out[r] = {
       last_run: ts ? ts.toISOString() : null,
@@ -215,6 +281,18 @@ function routineHealth() {
       session_limit: sessionLimit,
       log: latest,
     };
+  }
+
+  // Hung off auto-draft because that is the routine the drain wraps. Kept
+  // out of the loop above so it is obvious this reads a different log
+  // (`drain-auto-draft-*` vs the routine's `auto-draft-*`).
+  if (out['auto-draft']) {
+    const rescue = applyDateRescueHealth(logsDir, files, mtimeMs, now);
+    out['auto-draft'].apply_date_rescue = rescue;
+    out['auto-draft'].apply_date_rescue_missing = rescue.checked === true && rescue.missing === true;
+    out['auto-draft'].apply_date_rescue_failed =
+      rescue.checked === true && typeof rescue.failed === 'number' && rescue.failed > 0
+        ? rescue.failed : 0;
   }
   return out;
 }
@@ -528,7 +606,8 @@ if (report.auth_cascade.triggered) {
 }
 
 for (const [name, r] of Object.entries(report.routines)) {
-  if (r.status === 'MANUAL') { /* Cowork-side, not scheduled here — no signal */ }
+  if (r.status === 'MANUAL') { /* not scheduled here — no signal */ }
+  else if (r.status === 'RETIRED') { /* deliberately disabled — no signal */ }
   else if (r.status === 'NEVER_RUN') yellow.push(`routine "${name}" has never run`);
   else if (r.status === 'STALE') red.push(`routine "${name}" last ran ${r.age_hours}h ago (max ${r.max_age_h}h for its ${r.cadence} cadence)`);
   else if (r.status === 'SESSION_LIMIT') yellow.push(`routine "${name}" hit Claude session limit (external, not a code issue) — will retry on next fire`);
@@ -536,6 +615,12 @@ for (const [name, r] of Object.entries(report.routines)) {
   else if (r.status === 'WITH_ERRORS') yellow.push(`routine "${name}" reported ${r.errors} error(s) in last run`);
   else if (r.status === 'NO_CONTRACT') red.push(`routine "${name}" last log has no contract block (silent failure?)`);
   else green.push(`routine "${name}" healthy`);
+  // Apply-date guard health, hung off the routine whose drain wraps it.
+  if (r.apply_date_rescue_missing) {
+    red.push(`routine "${name}" drain log has no APPLY_DATE_RESCUE line (${r.apply_date_rescue.log}) — the apply-date guard did not report; Apply dates are being lost again`);
+  } else if (r.apply_date_rescue_failed > 0) {
+    red.push(`routine "${name}" apply-date rescue failed to write ${r.apply_date_rescue_failed} row(s) — those flip dates are unrecoverable once the ledger prunes them`);
+  }
 }
 if (report.config.key_files_missing.length) red.push(`missing key files: ${report.config.key_files_missing.join(', ')}`);
 if (!report.config.NOTION_TOKEN_set) red.push('NOTION_TOKEN not set in current shell');
@@ -566,7 +651,7 @@ if (JSON_OUT) {
 // Human-readable
 const fmtRoutine = (name, r) => {
   const yellow = new Set(['WITH_ERRORS', 'SESSION_LIMIT', 'EMPTY_LOG']);
-  const grey   = new Set(['NEVER_RUN', 'MANUAL']);
+  const grey   = new Set(['NEVER_RUN', 'MANUAL', 'RETIRED']);
   const emoji = r.status === 'OK' ? '🟢' : yellow.has(r.status) ? '🟡' : grey.has(r.status) ? '⚪' : '🔴';
   return `  ${emoji} ${name.padEnd(22)} status=${r.status.padEnd(13)} age=${r.age_hours ?? '?'}h  errors=${r.errors ?? '?'}`;
 };
