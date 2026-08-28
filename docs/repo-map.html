@@ -116,7 +116,7 @@ function catColor(k){
 const N=[
   // ── Pipeline stages ──────────────────────────────────────────────
   {id:'s1',l:'1. Discovered',c:'pipeline',d:'New posting found by scanners; written to Notion at Stage 1 (or applications.md if Notion is not wired)'},
-  {id:'s2',l:'2. Triaged',c:'pipeline',d:'A–G evaluation scored ≥ triage.score_floor (default 70) → promoted here; below → Not pursuing'},
+  {id:'s2',l:'2. Triaged',c:'pipeline',d:'A–G evaluation scored ≥ triage.score_floor (default 80) → promoted here; below → auto-archived (trash_below_floor). Bounded recruiter-sim INVITE override may promote sub-floor rows down to triage.override_floor.'},
   {id:'s3',l:'3. Drafted',c:'pipeline',d:'Tailored CV + cover letter generated and attached; QA agent (cv-qa) may patch verbatim fixes'},
   {id:'s4',l:'4. Applied',c:'pipeline',d:'Candidate submitted the application. The agent NEVER auto-submits; this transition is always human-made'},
   {id:'s5',l:'5–9. Interviews',c:'pipeline',d:'Assessment → Phone → Tech → Onsite → Offer → Signed (interview-prep mode assembles a per-company pack)'},
@@ -249,6 +249,77 @@ const N=[
 
   // ── Auto-driver + batch worker (infra) ───────────────────────────
   {id:'adr',l:'_autodraft_cv_run.mjs',c:'infra',d:'One-shot CV-build driver called by auto-draft — resolves variant/lang/market and invokes generate-pdf-tailored',p:'batch/_autodraft_cv_run.mjs'},
+
+  // ── v2.4 additions ───────────────────────────────────────────────
+  // Modes (v2.4)
+  {id:'m_bev',l:'cv-cl-brutal-eval.md',c:'build',d:'Pre-render LLM QA prompt: FATAL / MAJOR / MINOR failure taxonomy against JD + profile evidence base. Consumed by cv-qa.mjs.',p:'modes/cv-cl-brutal-eval.md'},
+  {id:'m_chs',l:'chrome-scan.md',c:'build',d:'Visible-browser scan for auth-walled portals (LinkedIn/Xing/Stepstone etc.); BD fallback when the extension is not reachable.',p:'modes/chrome-scan.md'},
+  {id:'m_de',l:'modes/de/',c:'build',d:'German mode variants (Anschreiben, Angebot, Bewerben, Pipeline) with DACH vocabulary (Probezeit, Kündigungsfrist, AGG, Tarifvertrag).',p:'modes/de/'},
+
+  // Batch drivers (v2.4)
+  {id:'adr2',l:'_autodraft_cl_run.mjs',c:'infra',d:'One-shot cover-letter build driver called by auto-draft — mirrors _autodraft_cv_run for the CL half',p:'batch/_autodraft_cl_run.mjs'},
+  {id:'adfj',l:'_autodraft_fetch_jds.mjs',c:'infra',d:'Fetch the full JD text per Stage-2 row into batch/logs/ before drafting',p:'batch/_autodraft_fetch_jds.mjs'},
+  {id:'adnw',l:'_autodraft_notion_write.mjs',c:'infra',d:'Write draft properties back to Notion (Stage transition + attachments) after CV+CL are built',p:'batch/_autodraft_notion_write.mjs'},
+  {id:'adsj',l:'_autodraft_split_jd.mjs',c:'infra',d:'Split JD text into structured sections (requirements / tools / seniority) for downstream matchers',p:'batch/_autodraft_split_jd.mjs'},
+  {id:'adup',l:'_autodraft_upload_plan.mjs',c:'infra',d:'Plans the foreground synchronous upload order for CV / CL / form-answers to Notion',p:'batch/_autodraft_upload_plan.mjs'},
+  {id:'adxs',l:'_autodraft_crossstage_filter.mjs',c:'infra',d:'Guards against re-drafting rows already past Stage 3 (protects sent applications from PDF churn)',p:'batch/_autodraft_crossstage_filter.mjs'},
+  {id:'brs3',l:'_rerender_stage3_backlog.mjs',c:'infra',d:'Bulk re-render helper for the Stage-3 send-ready backlog (Stage-3 only; NEVER Stage 4+)',p:'batch/_rerender_stage3_backlog.mjs'},
+  {id:'bnrl',l:'normalise-language.mjs',c:'infra',d:'Normalise Notion Language field from JD text (EN / DE / Bilingual)',p:'batch/normalise-language.mjs'},
+  {id:'bssa',l:'stage-sync-applied.mjs',c:'infra',d:'Cross-check Notion applied rows against local artefacts and reconcile the Apply-date field',p:'batch/stage-sync-applied.mjs'},
+  {id:'bbad',l:'backfill-apply-dates.mjs',c:'infra',d:'Backfill missing Apply-date values from artefact filenames',p:'batch/backfill-apply-dates.mjs'},
+  {id:'bard',l:'artefact-date.mjs',c:'infra',d:'Derive the canonical artefact date from a CV / CL filename slug',p:'batch/artefact-date.mjs'},
+  {id:'brco',l:'recheck-collisions.mjs',c:'infra',d:'Re-detect same-URL / same-company duplicates that slipped past initial dedup',p:'batch/recheck-collisions.mjs'},
+  {id:'bfun',l:'funnel-experiments.mjs',c:'infra',d:'Experiment harness for funnel calibration (score-band, portal, referral slices)',p:'batch/funnel-experiments.mjs'},
+
+  // CV toolchain (v2.4)
+  {id:'cpe',l:'profile-enrich.mjs',c:'build',d:'Bounded LLM enrichment of the CV Profile paragraph — never dumps stack; keeps 50-80 words; scrubs em/en dashes',p:'scripts/cv/profile-enrich.mjs'},
+  {id:'cllm',l:'llm-client.mjs',c:'build',d:'Subscription-safe LLM client for CV/CL helpers — routes via claude -p by default; never sets ANTHROPIC_API_KEY unless the operator opts in',p:'scripts/cv/llm-client.mjs'},
+  {id:'nsd',l:'notion-semantic-dedup.mjs',c:'build',d:'Layer-4 semantic dedup: fingerprints Notion rows by (company | role | location); archives dupes as pre-flight to auto-draft',p:'scripts/cv/notion-semantic-dedup.mjs'},
+  {id:'crs',l:'company-research-store.mjs',c:'build',d:'Per-company research cache; feeds cover-letter research.js so the LLM never re-fetches within a session',p:'scripts/cv/company-research-store.mjs'},
+  {id:'psl',l:'profile-source-log.mjs',c:'build',d:'Logs which CV profile source shipped per application (llm-enriched / template / static / …) for A/B analysis',p:'scripts/cv/profile-source-log.mjs'},
+  {id:'pso',l:'profile-source-outcomes.mjs',c:'build',d:'Joins profile-source log to Notion outcomes; answers "which profile flavour converts?"',p:'scripts/cv/profile-source-outcomes.mjs'},
+  {id:'qao',l:'qa-outcomes.mjs',c:'build',d:'Roll-up of cv-qa PASS / AUTO_PATCHED / REGENERATE stats across recent runs',p:'scripts/cv/qa-outcomes.mjs'},
+  {id:'nsl',l:'nda-safe-list.mjs',c:'build',d:'Enforces the NDA safe list at CV/CL build time (never leak a client name under NDA)',p:'scripts/cv/nda-safe-list.mjs'},
+  {id:'bcv',l:'build-cvs.js',c:'build',d:'CJS renderer for the general CV variants (EN / DE / DACH-format-EN) from cv_master.json',p:'scripts/cv/build-cvs.js'},
+  {id:'mkt',l:'market-tail.cjs',c:'build',d:'Resolves the market-aware visa + availability tail (one market per CV; cross-market leaks throw)',p:'scripts/cv/market-tail.cjs'},
+  {id:'psc',l:'project-scoring.cjs',c:'build',d:'Scores project-pool entries against JD keywords + archetype; caps to _profile.md max_projects',p:'scripts/cv/project-scoring.cjs'},
+
+  // Scan additions (v2.4)
+  {id:'lsw',l:'liveness-sweep.mjs',c:'ingest',d:'Bulk liveness check over Stage-1/2 rows; retires 410/404 postings before they burn eval budget',p:'scripts/scan/liveness-sweep.mjs'},
+  {id:'scf',l:'scan-freshness.mjs',c:'ingest',d:'Portal freshness scorecard; flags portals whose dedup rate is climbing (yield exhausted)',p:'scripts/scan/scan-freshness.mjs'},
+  {id:'rcl',l:'retro-clean.mjs',c:'ingest',d:'Retrospective cleanup pass for the Stage-1 queue — applies today\'s filters to old rows',p:'scripts/scan/retro-clean.mjs'},
+
+  // Notion + infra (v2.4)
+  {id:'nsw',l:'notion-scan-write.mjs',c:'infra',d:'Deterministic Stage-1 Notion writer used by BOTH morning-scan and bd-bulk-scan (via notion-stage1.mjs). Single supported insert path.',p:'scripts/notion/notion-scan-write.mjs'},
+  {id:'ns1',l:'notion-stage1.mjs',c:'infra',d:'Shared field-derivation for Country / Position / Company tier at Stage-1 insert time. Edit here → both scanners move together.',p:'scripts/notion/notion-stage1.mjs'},
+  {id:'nrl',l:'routine-logs-core.mjs',c:'infra',d:'Shared parser for data/routine-logs/* used by system-eval + dashboard',p:'scripts/routine-logs-core.mjs'},
+  {id:'wrl',l:'write-routine-log.mjs',c:'infra',d:'Uniform writer for data/routine-logs/{routine}-{ts}.log — every routine calls this exactly once',p:'scripts/write-routine-log.mjs'},
+  {id:'nrt',l:'net-retry.mjs',c:'infra',d:'Shared HTTP retry with exponential backoff, Retry-After honouring, and auth-fast-fail (401 does not retry)',p:'scripts/net-retry.mjs'},
+  {id:'sld',l:'seen-ledger.mjs',c:'infra',d:'Content-based dedup ledger (independent of URL churn) shared across scanners',p:'scripts/seen-ledger.mjs'},
+  {id:'sev',l:'system-eval.mjs',c:'infra',d:'Watchdog collector — cadence-aware staleness (weekday routines: ~30h, Monday: ~78h, post-bank-holiday: ~102h), weekly routines: ~8-day, manual: never stale',p:'scripts/system-eval.mjs'},
+
+  // Cover-letter helpers (v2.4)
+  {id:'clph',l:'portal-hosts.js',c:'build',d:'Portal-hostname regex table used by cover-letter research + form-drafter for portal-specific handling',p:'scripts/cover-letters/lib/portal-hosts.js'},
+  {id:'clg2',l:'letter-gates.js',c:'build',d:'Deterministic gates over CL body (dash / vocab / abbreviation / language). Fails fast; used by render pipeline + tests',p:'scripts/cover-letters/lib/letter-gates.js'},
+
+  // Email loop (v2.4)
+  {id:'em_a',l:'email/apply.mjs',c:'infra',d:'Apply the email-loop match rules onto Notion + local tracker',p:'scripts/email/apply.mjs'},
+  {id:'em_m',l:'email/match.mjs',c:'infra',d:'Match inbound email against Notion Applications rows (subject / sender / thread heuristics)',p:'scripts/email/match.mjs'},
+  {id:'em_p',l:'email/probe.mjs',c:'infra',d:'Probe an email provider (Gmail/IMAP) for new messages since the last scan',p:'scripts/email/probe.mjs'},
+  {id:'em_s',l:'email/scan-state.mjs',c:'infra',d:'Local checkpoint for the email loop (last-seen UID / thread cursor)',p:'scripts/email/scan-state.mjs'},
+
+  // Hooks + example schedule
+  {id:'hpc',l:'pre-commit',c:'infra',d:'Local pre-commit hook: leak grep + fast lint before allowing a commit',p:'hooks/pre-commit'},
+  {id:'nsex',l:'normalise-schedule.example.ps1',c:'auto',d:'Example: normalise Windows Task Scheduler to one Mon-Fri task per routine (personal task names stripped)',p:'routines/normalise-schedule.example.ps1'},
+
+  // Tests (v2.4)
+  {id:'ta',l:'test-all.mjs',c:'infra',d:'Aggregator: syntax, scripts, unit tests, dashboard build, data contract, leak grep, absolute paths',p:'scripts/test-all.mjs'},
+  {id:'tbc',l:'test-build-cvs-smoke.mjs',c:'infra',d:'Smoke test that build-cvs.js renders every variant from cv_master.example.json without leaking market-tail across markets',p:'scripts/test-build-cvs-smoke.mjs'},
+  {id:'tse',l:'system-eval.test.mjs',c:'infra',d:'Unit test for system-eval.mjs log-selection (cadence tolerance + bank-holiday awareness)',p:'scripts/system-eval.test.mjs'},
+  {id:'tnr',l:'net-retry.test.mjs',c:'infra',d:'Unit test for net-retry (401 fast-fail, Retry-After honouring)',p:'scripts/net-retry.test.mjs'},
+  {id:'trt',l:'role-taxonomy.test.mjs',c:'infra',d:'Unit test for the optional role-taxonomy loader (substring matching for German inflections)',p:'scripts/scan/role-taxonomy.test.mjs'},
+  {id:'tlg',l:'letter-gates.test.js',c:'infra',d:'Unit test for CL letter-gates (dash / vocab / abbreviation)',p:'scripts/cover-letters/lib/letter-gates.test.js'},
+  {id:'tem',l:'email/match.test.mjs',c:'infra',d:'Unit test for the email match rules',p:'scripts/email/match.test.mjs'},
 ];
 
 const E=[
@@ -350,6 +421,71 @@ const E=[
 
   // ── Health/version ───────────────────────────────────────────────
   {s:'doc',t:'ver',y:'data'},{s:'doc',t:'prof',y:'data'},
+
+  // ── v2.4 edges ───────────────────────────────────────────────────
+  // Modes → resources
+  {s:'m_bev',t:'_pr',y:'import'},{s:'qa',t:'m_bev',y:'import'},
+  {s:'m_chs',t:'port',y:'data'},{s:'m_chs',t:'m_scan',y:'import'},{s:'m_chs',t:'bd',y:'routine'},
+  {s:'m_de',t:'_pr',y:'import'},{s:'m_de',t:'_sh',y:'import'},
+
+  // Auto-draft batch driver breakdown
+  {s:'adr',t:'adfj',y:'routine'},{s:'adr',t:'adsj',y:'routine'},{s:'adr',t:'adup',y:'routine'},
+  {s:'adr2',t:'clg',y:'routine'},{s:'r_ad',t:'adr2',y:'routine'},
+  {s:'r_ad',t:'adnw',y:'routine'},{s:'adnw',t:'nu',y:'routine'},{s:'adnw',t:'nd',y:'routine'},
+  {s:'r_ad',t:'adxs',y:'routine'},{s:'r_ad',t:'nsd',y:'routine'},
+  {s:'brs3',t:'adr',y:'routine'},{s:'brs3',t:'s3',y:'routine'},
+  {s:'bssa',t:'not',y:'data'},{s:'bbad',t:'bard',y:'import'},{s:'bbad',t:'not',y:'data'},
+  {s:'bnrl',t:'not',y:'data'},{s:'brco',t:'not',y:'data'},
+
+  // CV toolchain wiring
+  {s:'cpe',t:'cllm',y:'import'},{s:'qa',t:'cllm',y:'import'},
+  {s:'gpdft',t:'cpe',y:'import'},{s:'gpdft',t:'mkt',y:'import'},{s:'gpdft',t:'psc',y:'import'},
+  {s:'gpdft',t:'nsl',y:'import'},
+  {s:'bcv',t:'mkt',y:'import'},{s:'bcv',t:'psc',y:'import'},{s:'bcv',t:'jdt',y:'import'},
+  {s:'m_pdf',t:'bcv',y:'routine'},
+  {s:'psl',t:'amd',y:'data'},{s:'pso',t:'psl',y:'import'},{s:'pso',t:'not',y:'data'},
+  {s:'qao',t:'amd',y:'data'},{s:'crs',t:'cls',y:'import'},
+
+  // Scan additions
+  {s:'lsw',t:'live',y:'import'},{s:'lsw',t:'not',y:'data'},
+  {s:'scf',t:'sht',y:'data'},{s:'rcl',t:'not',y:'data'},
+
+  // Notion insert path unified
+  {s:'nsw',t:'not',y:'data'},{s:'nsw',t:'ns1',y:'import'},
+  {s:'scan',t:'nsw',y:'routine'},{s:'bd',t:'nsw',y:'routine'},
+  {s:'r_ms',t:'nsw',y:'routine'},{s:'r_bb',t:'nsw',y:'routine'},
+
+  // Routine-log infra
+  {s:'sev',t:'nrl',y:'import'},{s:'sev',t:'prof',y:'data'},
+  {s:'r_se',t:'sev',y:'routine'},
+  {s:'wrl',t:'nrl',y:'import'},
+  {s:'scan',t:'wrl',y:'import'},{s:'bd',t:'wrl',y:'import'},
+  {s:'r_hb',t:'wrl',y:'import'},
+
+  // Shared plumbing
+  {s:'scan',t:'nrt',y:'import'},{s:'bd',t:'nrt',y:'import'},{s:'live',t:'nrt',y:'import'},
+  {s:'clg',t:'nrt',y:'import'},{s:'cls',t:'nrt',y:'import'},
+  {s:'scan',t:'sld',y:'import'},{s:'bd',t:'sld',y:'import'},
+
+  // Cover-letter helpers
+  {s:'cls',t:'clph',y:'import'},{s:'clf',t:'clph',y:'import'},
+  {s:'cld',t:'clg2',y:'import'},{s:'dinr',t:'clg2',y:'import'},
+
+  // Email loop
+  {s:'em_a',t:'em_m',y:'import'},{s:'em_a',t:'not',y:'data'},{s:'em_a',t:'amd',y:'data'},
+  {s:'em_p',t:'em_s',y:'import'},{s:'em_p',t:'em_m',y:'import'},
+
+  // Tests → subjects
+  {s:'ta',t:'tnr',y:'routine'},{s:'ta',t:'tbc',y:'routine'},{s:'ta',t:'tse',y:'routine'},
+  {s:'ta',t:'trt',y:'routine'},{s:'ta',t:'tlg',y:'routine'},{s:'ta',t:'tem',y:'routine'},
+  {s:'tnr',t:'nrt',y:'import'},{s:'tbc',t:'bcv',y:'import'},{s:'tse',t:'sev',y:'import'},
+  {s:'trt',t:'rtx',y:'import'},{s:'tlg',t:'clg2',y:'import'},{s:'tem',t:'em_m',y:'import'},
+
+  // Hook
+  {s:'hpc',t:'ta',y:'routine'},
+
+  // Schedule example
+  {s:'nsex',t:'rw',y:'routine'},
 ];
 
 // Build lookup + adjacency
