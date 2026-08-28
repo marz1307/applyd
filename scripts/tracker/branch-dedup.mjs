@@ -196,6 +196,12 @@ for (const p of pages) {
   const position   = getProp(p, "Position", "multi_select");
   const fitNotes   = getProp(p, "Fit notes", "rich_text");
   const appId      = getProp(p, "App ID", "rich_text") || p.id.slice(-8);
+  // An Apply date means the application was SENT, whatever the Stage says.
+  // Stage is not a reliable proxy: rows can sit at "3. Drafted" with an Apply
+  // date already set until stage-sync catches up. NEVER archive a sent row —
+  // losing a duplicate is cheap, losing a live employer conversation is not,
+  // and it is invisible (the row simply stops existing and no metric moves).
+  const applied    = getProp(p, "Apply date", "date");
 
   const key = `${normCompany(company)}|${normCity(location, country)}|${normRole(position)}`;
   if (!groups.has(key)) groups.set(key, []);
@@ -208,6 +214,7 @@ for (const p of pages) {
     discovered,
     remoteTier: remoteTier(location, position),
     fitNotes,
+    applied,
   });
 }
 
@@ -216,8 +223,11 @@ const plan = { winners: [], losers: [], single_member_groups: 0 };
 for (const [key, members] of groups) {
   if (members.length === 1) { plan.single_member_groups++; continue; }
 
-  // Sort: score DESC, discovered DESC, remoteTier DESC, appId ASC
+  // Sort: SENT FIRST, then score DESC, discovered DESC, remoteTier DESC, appId ASC.
+  // A sent application outranks any unsent sibling no matter how it scores — you
+  // cannot un-send it, and archiving it loses the thread with a real employer.
   members.sort((a, b) => {
+    if (!!a.applied !== !!b.applied) return a.applied ? -1 : 1;
     if (b.score !== a.score) return b.score - a.score;
     const ad = a.discovered || "0";
     const bd = b.discovered || "0";
@@ -226,7 +236,15 @@ for (const [key, members] of groups) {
     return String(a.appId).localeCompare(String(b.appId));
   });
   const winner = members[0];
-  const losers = members.slice(1);
+  // Belt and braces over the sort above: if a branch holds more than one sent
+  // application, the sort can only rescue one of them, and the rest would be
+  // archived. Filter EVERY sent row out of the loser set, not just the tail.
+  const rawLosers = members.slice(1);
+  const losers = rawLosers.filter((l) => !l.applied);
+  for (const l of rawLosers.filter((l) => l.applied)) {
+    plan.protected_sent = (plan.protected_sent || 0) + 1;
+    console.error(`  PROTECTED: ${l.appId} ${l.company} has Apply date ${l.applied} — sent application, refusing to archive`);
+  }
 
   plan.winners.push({
     appId: winner.appId,
@@ -264,20 +282,32 @@ if (DRY_RUN || JSON_OUT) {
       if (plan.losers.length > 20) console.log(`    ... and ${plan.losers.length - 20} more`);
     }
   }
-  process.exit(0);
+  // process.exitCode, not process.exit() — see the note at the foot of this file.
+  process.exitCode = 0;
+} else {
+  // Apply — archive losers only; winners stay untouched
+  let archived = 0, failed = 0;
+  for (const l of plan.losers) {
+    try {
+      await archivePage(l.pageId);
+      archived++;
+    } catch (e) { failed++; console.error(`  ARCHIVE fail ${l.appId}: ${e.message}`); }
+  }
+
+  console.log(`\nbranch-dedup applied:`);
+  console.log(`  groups deduped:    ${plan.winners.length}`);
+  console.log(`  rows archived:     ${archived}`);
+  console.log(`  failures:          ${failed}`);
+  process.exitCode = failed > 0 ? 1 : 0;
 }
 
-// Apply — archive losers only; winners stay untouched
-let archived = 0, failed = 0;
-for (const l of plan.losers) {
-  try {
-    await archivePage(l.pageId);
-    archived++;
-  } catch (e) { failed++; console.error(`  ARCHIVE fail ${l.appId}: ${e.message}`); }
-}
-
-console.log(`\nbranch-dedup applied:`);
-console.log(`  groups deduped:    ${plan.winners.length}`);
-console.log(`  rows archived:     ${archived}`);
-console.log(`  failures:          ${failed}`);
-process.exit(failed > 0 ? 1 : 0);
+// ─── Why process.exitCode and not process.exit() ─────────────────────────────
+// process.exit() tears the event loop down synchronously. Any keep-alive
+// sockets undici opened for the Notion queries above may still be closing at
+// that moment, and on Windows the teardown can trip libuv's assertion
+// (`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), src/win/async.c:94`,
+// surfacing as exit code -1073740791 / 0xC0000409) AFTER all the real work has
+// completed and printed. Setting process.exitCode instead lets Node drain its
+// handles and exit on its own with the status we asked for, which cannot trip
+// the assertion. The early process.exit(5) for the missing-token guard stays
+// as it is — it fires before any fetch, so there are no in-flight handles.
