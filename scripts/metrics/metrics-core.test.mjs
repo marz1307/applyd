@@ -17,6 +17,8 @@ import {
   isApplied, hasProgressed, isRejected, hasResponded, isGhosted,
   classifyNotionOutcome, normalizeStatus, classifyLocalOutcome,
   rate, avg, funnelHeadline, sliceBy, scoreCalibration, windowAdherence,
+  stageEdgeCalibration, parseBlockScores, dimensionCalibration,
+  advertIdFingerprint,
 } from "./metrics-core.mjs";
 
 let pass = 0, fail = 0;
@@ -157,6 +159,99 @@ for (const [al, target] of Object.entries(STATUS_ALIASES)) {
 
 // Applied-stage lists are strict subsets of the stage taxonomy in order.
 check("PROGRESSED subset APPLIED (Signed allowed)", PROGRESSED_STAGES.every((s) => APPLIED_STAGES.includes(s) || s === "Signed"), true);
+
+// ── Stage-edge calibration ──────────────────────────────────────────────────
+// Synthetic cohort: low band (score 76) responds 1/5, high band (score 92)
+// responds 5/5 and progresses 3/5 — applied->responded must read predictive.
+const EDGE_ROWS = [
+  ...Array.from({ length: 4 }, () => ({ stage: "4. Applied", match_score: 76 })),
+  { stage: "4. Applied", match_score: 76, response_date: "2026-07-01" },
+  ...Array.from({ length: 2 }, () => ({ stage: "4. Applied", match_score: 92, response_date: "2026-07-01" })),
+  ...Array.from({ length: 3 }, () => ({ stage: "5. Assessment/OA", match_score: 92 })),
+];
+const EC = stageEdgeCalibration(EDGE_ROWS, { minBandSize: 5 });
+const eResp = EC.edges.find((e) => e.edge === "applied_to_responded");
+check("edge: applied->responded predictive on synthetic spread", eResp.verdict, "predictive");
+check("edge: 75-79 band converts 20%", eResp.bands.find((b) => b.band === "75-79").conversion_pct, 20);
+check("edge: 90+ band converts 100%", eResp.bands.find((b) => b.band === "90+").conversion_pct, 100);
+const eProg = EC.edges.find((e) => e.edge === "responded_to_progressed");
+check("edge: responded->progressed denominator is responders only", eProg.entering_total, 6);
+check("edge: deep edges marked best-effort",
+  EC.edges.filter((e) => e.best_effort).map((e) => e.edge),
+  ["progressed_to_interview", "interview_to_offer"]);
+check("edge: unscored rows excluded", stageEdgeCalibration([{ stage: "4. Applied" }]).scored_rows, 0);
+
+// ── Block-score parsing + dimension calibration ─────────────────────────────
+check("blocks: sentinel parses", parseBlockScores("prose [blocks A=4.2 B=3.8 G=5] more"),
+  { A: 4.2, B: 3.8, G: 5 });
+check("blocks: case-insensitive tag, absent -> null", parseBlockScores("no sentinel here"), null);
+check("blocks: garbage pairs dropped", parseBlockScores("[blocks A=4.0 Z=9 B=x]"), { A: 4 });
+// A discriminates (high-A rows respond), B does not.
+const DIM_ROWS = [
+  ...Array.from({ length: 6 }, () => ({ stage: "4. Applied", block_scores: { A: 5, B: 3 }, response_date: "2026-07-01" })),
+  ...Array.from({ length: 6 }, () => ({ stage: "4. Applied", block_scores: { A: 2, B: 3 } })),
+];
+const DC = dimensionCalibration(DIM_ROWS, { minPerSide: 5 });
+check("dim: A carries signal", DC.dimensions.find((d) => d.block === "A").verdict, "signal");
+check("dim: C has no data", DC.dimensions.find((d) => d.block === "C").verdict, "no-data");
+check("dim: rows without blocks counted",
+  dimensionCalibration([{ stage: "4. Applied" }]).rows_without_blocks, 1);
+
+// ── Advert-identity fingerprint ─────────────────────────────────────────────
+// Every case here is a real URL from the tracker, not a constructed one.
+
+const aid = advertIdFingerprint;
+
+// The duplicate that motivated the whole thing: one eFC advert, two slugs.
+check("advert: eFC id extracted",
+  aid("https://www.efinancialcareers.de/jobs-Germany-Mitte-Data_Platform_Engineer.id24578904"), "efc:24578904");
+check("advert: the same eFC advert under a different slug collapses",
+  aid("https://www.efinancialcareers.de/jobs-Germany-Mitte-Data_Engineer.id24578904"), "efc:24578904");
+check("advert: eFC .de and .co.uk are one portal",
+  aid("https://www.efinancialcareers.co.uk/jobs-UK-London-X.id24647605"),
+  aid("https://www.efinancialcareers.de/jobs-UK-London-X.id24647605"));
+
+// Locale variants of one advert must collapse, on the portal rules and on the
+// generic host fallback alike.
+check("advert: LinkedIn country subdomains collapse",
+  aid("https://uk.linkedin.com/jobs/view/data-analyst-at-x-4451241178"), "linkedin:4451241178");
+check("advert: Siemens en_US and de_DE are one job",
+  aid("https://jobs.siemens.com/en_US/externaljobs/JobDetail/518024"),
+  aid("https://jobs.siemens.com/de_DE/externaljobs/JobDetail/518024"));
+check("advert: a query string does not change identity",
+  aid("https://jobs.booking.com/booking/jobs/29399?lang=en-us"), "jobs.booking.com:29399");
+
+// A Greenhouse-backed careers page carries the authoritative board id in the
+// query string; its own path id is incidental.
+check("advert: gh_jid wins over the host path",
+  aid("https://traderepublic.com/en-de/about?jobId=7623520003&gh_jid=7623520003"), "greenhouse:7623520003");
+
+// Namespacing is not decorative — this collision is live in the tracker.
+check("advert: same number on two hosts does not collide",
+  aid("https://jobs.comparethemarketcareers.com/en/job/100234") ===
+  aid("https://ebet.fa.em3.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/requisitions/preview/100234"),
+  false);
+
+// Caught in validation, 2026-08-16: three unrelated London jobs (Funding
+// Circle, Ekimetrics, Ogury) all ended "_london" and merged into one cluster.
+// A WTTJ slug without a hash must yield NO id rather than the city name.
+check("advert: WTTJ hash extracted",
+  aid("https://www.welcometothejungle.com/en/companies/iwoca/jobs/data-scientist_london_w7ojw2nw"), "wttj:w7ojw2nw");
+check("advert: WTTJ slug with no hash yields nothing, not the city",
+  aid("https://www.welcometothejungle.com/en/companies/funding-circle/jobs/data-analyst_london"), "");
+// Both must yield NO id. An empty key is skipped by the clusterer, so two
+// hashless London jobs can never be joined; asserting they "differ" would be
+// meaningless, since "" === "" is trivially true.
+check("advert: hashless WTTJ jobs produce no key at all, so cannot cluster",
+  [aid("https://www.welcometothejungle.com/en/companies/ogury/jobs/data-engineer_london"),
+   aid("https://www.welcometothejungle.com/en/companies/ekimetrics/jobs/junior-data-scientist_london")],
+  ["", ""]);
+
+// Absence of a key must be safe: no id means no dedup, never a wrong guess.
+check("advert: unparseable URL yields nothing", aid("not a url"), "");
+check("advert: empty input yields nothing", aid(""), "");
+check("advert: slug-only board yields nothing",
+  aid("https://www.brightnetwork.co.uk/graduate-jobs/friend-mts/junior-data-scientist-birmingham-2026-ai6p"), "");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

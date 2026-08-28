@@ -17,9 +17,12 @@
  *   - rejection rate  = explicit rejections / applications
  *   - the same, sliced by source portal, country, referral, sponsorship
  *   - a match-score reality check (avg score: progressed vs rejected vs pending)
+ *   - score calibration (response/screen rate per Match-score band, per edge)
+ *   - dimension calibration (which A-G block predicts a response)
  *
  * Auth: NOTION_TOKEN env var (internal integration token, `ntn_`/`secret_`).
- * Reads the database ID from config/profile.yml → notion.applications_database_id.
+ * Reads the database ID from config/profile.yml -> notion.applications_database_id
+ * (or the NOTION_DATABASE_ID env var).
  *
  * Usage:
  *   node funnel-metrics.mjs --summary        human-readable report (default)
@@ -31,8 +34,7 @@ import { readFileSync, existsSync } from "node:fs";
 import yaml from "js-yaml";
 import {
   funnelHeadline, sliceBy as sliceByCore, scoreCalibration,
-  isApplied as inApplied, hasProgressed as progressed, isRejected as rejected,
-  hasResponded as responded, avg,
+  stageEdgeCalibration, dimensionCalibration, parseBlockScores,
 } from "./metrics-core.mjs";
 
 const args = process.argv.slice(2);
@@ -94,6 +96,14 @@ function extractTitle(props) {
   if (!titleProp || !titleProp.title || titleProp.title.length === 0) return "";
   return titleProp.title.map(t => t.plain_text).join("");
 }
+
+// Extract the concatenated plain text of a rich_text property (used to read
+// the Fit-notes block-score sentinel).
+function rt(props, name) {
+  const prop = props?.[name];
+  return (prop?.rich_text || []).map((t) => t.plain_text).join("");
+}
+
 function row(page) {
   const p = page.properties || {};
   const sel = n => (p[n] && p[n].type === "select" ? p[n].select?.name ?? null : null);
@@ -109,12 +119,13 @@ function row(page) {
     country: sel("Country"),
     sponsorship: sel("Visa/sponsorship"),
     match_score: num("Match score"),
+    // [blocks A=4.2 B=3.8 ...] sentinel in Fit notes, written by
+    // notion-eval-write --blocks (2026-08-02 onward). null when absent.
+    block_scores: parseBlockScores(rt(p, "Fit notes")),
   };
 }
 
-// Classification predicates (inApplied/progressed/rejected/responded) are
-// aliased from metrics-core imports above. sliceBy wraps the shared helper
-// with this script's MIN_COHORT filter.
+// sliceBy wraps the shared metrics-core helper with this script's MIN_COHORT filter.
 const sliceBy = (rows, key) => sliceByCore(rows, key, { minCohort: MIN_COHORT });
 
 async function main() {
@@ -132,7 +143,13 @@ async function main() {
   // Headline funnel + score calibration come from metrics-core (shared with
   // dashboard/pace-alarm), so the same numbers surface everywhere.
   const headline = funnelHeadline(all);
-  const calibration = scoreCalibration(all);
+
+  // Score calibration — response/screen rate per Match-score band. THE
+  // self-improvement metric: its verdict says whether triage.score_floor and
+  // the scoring weights are earning their keep or running on noise.
+  const calibration = scoreCalibration(all, { minBandSize: Math.max(MIN_COHORT, 5) });
+
+  // Back-compat block (older consumers read these keys).
   const match_score_check = {
     avg_score_progressed: calibration.avg_score_by_outcome.progressed,
     avg_score_rejected: calibration.avg_score_by_outcome.rejected,
@@ -141,13 +158,28 @@ async function main() {
     note: calibration.note,
   };
 
+  // Stage-edge calibration — the same per-band question asked at EVERY funnel
+  // edge, each with its own verdict. Completes the one-off finding
+  // ("predictive at response, useless for response->screen") as a standing
+  // metric. Deep edges are best-effort: rows only carry their current stage.
+  const edge_calibration = stageEdgeCalibration(all, { minBandSize: Math.max(MIN_COHORT, 5) });
+
+  // Dimension calibration — which A-G block predicts a response. Empty until
+  // auto-eval starts writing [blocks ...] sentinels via notion-eval-write
+  // --blocks (2026-08-02 onward); reports its own rows_without_blocks so the
+  // gap is visible, not silent.
+  const dimension_calibration = dimensionCalibration(all);
+
   const result = {
     generated_at: new Date().toISOString(),
     total_rows_in_db: all.length,
     funnel,
     headline,
     match_score_check,
-    calibration,
+    calibration,                        // legacy key (older consumers)
+    score_calibration: calibration,     // canonical key alongside stage/dim
+    stage_edge_calibration: edge_calibration,
+    dimension_calibration,
     by_referral: sliceBy(all, "referral"),
     by_source_portal: sliceBy(all, "portal"),
     by_country: sliceBy(all, "country"),
@@ -158,7 +190,7 @@ async function main() {
 
   const pct = v => (v === null ? "  —" : `${String(v).padStart(4)}%`);
   const line = "─".repeat(72);
-  console.log("\nCAREER-OPS FUNNEL METRICS  (the real KPIs — not Match score)");
+  console.log("\nAPPLYD FUNNEL METRICS  (the real KPIs — not Match score)");
   console.log(line);
   console.log(`Applications submitted : ${headline.applications_submitted}`);
   console.log(`Responses              : ${headline.responses}   (response rate ${pct(headline.response_rate_pct)})`);
@@ -168,7 +200,47 @@ async function main() {
   console.log(line);
   console.log("MATCH-SCORE REALITY CHECK (avg Match score by outcome)");
   console.log(`  progressed: ${match_score_check.avg_score_progressed ?? "—"}   rejected: ${match_score_check.avg_score_rejected ?? "—"}   silent: ${match_score_check.avg_score_silent ?? "—"}`);
-  console.log(`  → ${match_score_check.note}`);
+  console.log(`  -> ${match_score_check.note}`);
+  console.log(line);
+  console.log(`SCORE CALIBRATION — verdict: ${calibration.verdict.toUpperCase()}`);
+  console.log("  " + "band".padEnd(8) + "apps".padStart(5) + "resp%".padStart(8) + "screen%".padStart(9) + "  (bands under n=" + calibration.min_band_size + " excluded from verdict)");
+  for (const b of calibration.bands) {
+    console.log(
+      "  " + b.band.padEnd(8) + String(b.applications).padStart(5) +
+      pct(b.response_rate_pct).padStart(8) + pct(b.screen_rate_pct).padStart(9) +
+      (b.in_verdict ? "" : "   (small sample)"),
+    );
+  }
+  console.log(`  -> ${calibration.note}`);
+
+  console.log(line);
+  console.log("STAGE-EDGE CALIBRATION (conditional conversion per band, per edge)");
+  for (const e of edge_calibration.edges) {
+    const bandsStr = e.bands
+      .map((b) => `${b.band}:${b.conversion_pct === null ? "—" : b.conversion_pct + "%"}${b.in_verdict ? "" : "*"}`)
+      .join("  ");
+    console.log(
+      `  ${e.edge.padEnd(26)} n=${String(e.entering_total).padStart(3)}  overall ${pct(e.overall_conversion_pct)}  ` +
+      `verdict: ${e.verdict.toUpperCase()}${e.best_effort ? " (best-effort)" : ""}`,
+    );
+    console.log(`    ${bandsStr}   (* = under n=${edge_calibration.min_band_size})`);
+  }
+  console.log(`  -> ${edge_calibration.bias_note}`);
+
+  console.log(line);
+  const dimsWithData = dimension_calibration.dimensions.filter((d) => d.n > 0);
+  if (!dimsWithData.length) {
+    console.log(`DIMENSION CALIBRATION — no rows carry [blocks ...] scores yet (${dimension_calibration.rows_without_blocks} applied rows without). Activates as auto-eval writes them via notion-eval-write --blocks.`);
+  } else {
+    console.log(`DIMENSION CALIBRATION (${dimension_calibration.rows_with_blocks} rows with block scores, ${dimension_calibration.rows_without_blocks} without)`);
+    for (const d of dimsWithData) {
+      console.log(
+        `  block ${d.block}  n=${String(d.n).padStart(3)}  median ${d.median}  ` +
+        `above ${pct(d.response_rate_above_median_pct)} vs <=median ${pct(d.response_rate_at_or_below_median_pct)}  ` +
+        `gap ${d.gap_pts ?? "—"}pts  verdict: ${String(d.verdict).toUpperCase()}`,
+      );
+    }
+  }
 
   const table = (title, rows) => {
     console.log(line);
