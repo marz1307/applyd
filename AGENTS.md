@@ -1,6 +1,6 @@
 # applyd — AI Job Search Pipeline
 
-> **This is the primary project contract.** It is agent-neutral and applies to any coding agent that reads `AGENTS.md` (Claude Code, Codex CLI, Cursor, Zed, OpenCode, Gemini CLI, Aider, …). Agent-specific overlays live in sibling files: `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/applyd.mdc`, `.aider.conf.yml`. See `docs/AGENT_COMPAT.md` for the full matrix.
+> **This is the primary project contract.** It is agent-neutral and applies to any coding agent that reads `AGENTS.md` (Claude Code, Codex CLI, Cursor, Zed, OpenCode, Gemini CLI, Aider, …). Agent-specific overlays live in sibling files: `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/applyd.mdc`, `.aider.conf.yml`. See `docs/AGENT_COMPAT.md` for the full matrix, and `docs/PORTING.md` if you maintain a personal fork and need to ship generic changes back to this remote without leaking personal data.
 
 ## Origin
 
@@ -244,6 +244,35 @@ Long-running batches and scheduled routines run via a headless agent CLI. The di
 - `routines/adapters/gemini.ps1` → `gemini -p "..."` (stub)
 
 A self-contained prompt for the batch worker is in `batch/batch-prompt.md`.
+
+### Session-length capping (per-session chunks + drain loop)
+
+Nightly LLM routines (`auto-eval`, `auto-draft`) do NOT try to process the whole backlog in one headless session — that swells the context to multi-MB and re-reads everything each turn. Per-run caps in `config/profile.yml → triage.*` are small **per-session chunks** (defaults `max_evaluations_per_run: 15`, `max_drafts_per_run: 7`, `auto-interview-prep: 5 packs`). Daily throughput is preserved by a **drain loop**: `routines/drain-routine.ps1 -Routine <r> -Stage <s>` re-fires the routine as a fresh small session per iteration until the target stage's Notion depth reaches 0. The checkpoint is the stage transition itself; there is a ceiling on iterations and a no-progress guard. `auto-interview-prep` stays single-fire — its Stage-4+ backlog is normally small.
+
+### ROUTINE_CONTRACT format
+
+Every routine ends its stdout with a machine-parseable contract block that the wrapper validates. If the block is missing or malformed, the run is treated as a failure regardless of exit code:
+
+```
+--- ROUTINE_CONTRACT ---
+ROUTINE: {name}
+TIMESTAMP_UTC: {iso}
+{routine-specific counters}
+ERRORS: {n}
+ERROR_DETAILS: |
+  {one line per error, if any}
+--- END_ROUTINE_CONTRACT ---
+```
+
+Watchdog / eval-collector routines use a parallel `--- SYSTEM_EVAL_CONTRACT --- … --- END SYSTEM_EVAL_CONTRACT ---` block. Do not summarise, code-fence, or paraphrase these blocks in agent output — the validator scans for the literal markers.
+
+### Applies-window mechanism
+
+`scripts/metrics/apply-window.mjs` reads `config/profile.yml → apply.*` (`local_tz`, `preferred_days`, `window_start_hour` / `window_end_hour`, `fallback_window_*`, `freshness_days_by_role`) and emits `RECOMMENDATION: send | hold | send-now-fast | skip-stale` per candidate URL. It is consumed by the scheduled `pace-check` routine, the pace-alarm `WINDOW_ADHERENCE` metric, and the interactive `apply.md` mode. Modes must NOT hardcode times or day-of-week — always read from the config.
+
+### No dashboard publish path
+
+The dashboard is read from the local `dashboard.html` that `scripts/dashboard/build-dashboard.mjs` writes, and nowhere else. There is no `publish-dashboard.sh` and there should not be. This is a private tool by design: employer names, match scores, and rejection data must not leave the operator's machine as a public artefact.
 
 ---
 
