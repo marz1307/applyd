@@ -47,9 +47,11 @@ Output is dual-channel:
    - **Quality 7-day metrics** — count of `PREDICTED_REJECT` entries; recruiter-sim verdict distribution (INVITE / MAYBE / REJECT).
 
 3. **Triage classification:**
-   - **🟢 Green**: routine healthy (status=OK, contract pass, age <48h, no errors).
-   - **🟡 Yellow**: routine with non-zero errors, OR Stage-1 backlog >300, OR ≥30 Stage-2 missing draft, OR >5 PREDICTED_REJECT in 7 days.
-   - **🔴 Red**: routine stale (>48h) on weekdays, OR no contract block in last log (silent failure), OR Notion/Bright Data unreachable, OR key files missing, OR `NOTION_TOKEN` / `BRIGHTDATA_DATASET_TOKEN` unset.
+   - **🟢 Green**: routine healthy (status=OK, contract pass, age within its cadence's `maxAgeHours` tolerance, no errors).
+   - **🟡 Yellow**: routine with non-zero errors, OR Stage-1 backlog above `pipeline_backlog_yellow_threshold` (default 300), OR ≥30 Stage-2 missing draft, OR >5 PREDICTED_REJECT in 7 days.
+   - **🔴 Red**: routine STALE (age > its cadence tolerance), OR no contract block in last log (silent failure), OR Notion / Bright Data unreachable, OR key files missing, OR `NOTION_TOKEN` / `BRIGHTDATA_DATASET_TOKEN` unset.
+
+   **Staleness is cadence-aware, not a flat 48h.** `system-eval.mjs` reads a `ROUTINE_CADENCE` table plus a `maxAgeHours` derivation that combines each routine's schedule with the UK bank-holiday calendar and any weekend gap immediately behind the check. Weekday routines therefore tolerate ~30h on a normal Tue-Fri, ~78h on a Monday (weekend gap), and up to ~102h on a post-bank-holiday Tuesday — a flat 48h threshold false-alarmed every Monday. Weekly routines get ~8-day tolerance; anything marked `manual` in the cadence table is never stale-flagged (interactive-only or Cowork-side).
 
 4. **Exit code:** 0 if no Red issues, 1 if ≥1 Red issue. The wrapper uses this to decide whether to notify.
 
