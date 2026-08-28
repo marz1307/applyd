@@ -52,25 +52,51 @@ roles:
   - { name: "Data Scientist", archetype: DS, tier: core, lang: en, aliases: ["Product Data Scientist"] }
   - { name: "Decision Scientist", archetype: DS, tier: adjacent, lang: en, aliases: [] }
   - { name: "Quantitative Analyst", archetype: DS, tier: adjacent, lang: en, aliases: [], notes: "Only where NOT quant-finance/maths-PhD." }
+  # DACH German forms — the noun germanises, sometimes with a feminine variant. Enable
+  # if you target DACH postings; drop `lang: de` rows if you don't.
+  - { name: "Datenwissenschaftler", archetype: DS, tier: core, lang: de, aliases: ["Datenwissenschaftlerin"] }
   # ── Data Engineer (DE) ──────────────────────────────────────────────
   - { name: "Data Engineer", archetype: DE, tier: core, lang: en, aliases: ["Cloud Data Engineer", "Data Platform Engineer"] }
   - { name: "Analytics Engineer", archetype: DE, tier: core, lang: en, aliases: ["Analytics Engineering", "dbt Developer"] }
   - { name: "ETL Developer", archetype: DE, tier: adjacent, lang: en, aliases: ["ELT Developer"] }
+  - { name: "Dateningenieur", archetype: DE, tier: core, lang: de, aliases: ["Dateningenieurin"] }
   # ── Data Analyst (DA) ───────────────────────────────────────────────
   - { name: "Data Analyst", archetype: DA, tier: core, lang: en, aliases: ["Product Data Analyst"] }
   - { name: "Business Analyst", archetype: DA, tier: adjacent, lang: en, aliases: [], notes: "Business, not data-engineering." }
   - { name: "Analytics", archetype: DA, tier: watch, lang: en, aliases: [], notes: "Bare \"Analytics\" is far too broad; hand-review only." }
+  - { name: "Datenanalyst", archetype: DA, tier: core, lang: de, aliases: ["Datenanalystin"] }
+  - { name: "Datenanalytiker", archetype: DA, tier: core, lang: de, aliases: ["Datenanalytikerin"], notes: "Parallel German form of Datenanalyst; both are advertised, neither dominates." }
   # ── BI / Reporting (BI) ─────────────────────────────────────────────
   - { name: "BI Engineer", archetype: BI, tier: core, lang: en, aliases: ["Business Intelligence Engineer"] }
   - { name: "BI Analyst", archetype: BI, tier: core, lang: en, aliases: ["Business Intelligence Analyst"] }
+  - { name: "Business Intelligence Entwickler", archetype: BI, tier: core, lang: de, aliases: ["Business Intelligence Entwicklerin", "BI-Entwickler", "BI-Entwicklerin"], notes: "German-language BI posting form. The noun stays English in DACH; only the role word germanises." }
+  - { name: "Business Intelligence Spezialist", archetype: BI, tier: core, lang: de, aliases: ["Business Intelligence Spezialistin", "BI-Spezialist", "BI-Spezialistin"] }
 
 # Titles that disqualify a posting regardless of any positive match.
 # Each carries a reason: seniority | wrong-tech | wrong-domain.
+#
+# German titles inflect freely — "Werkstudent" has to catch "Werkstudentin",
+# "Auszubildende", "Studierender" etc. Set `match: substring` on those entries
+# so the matcher hits the stem regardless of ending. Default match is full-word.
 exclusions:
   - { name: "Intern", reason: seniority }
   - { name: "Internship", reason: seniority }
   - { name: "Apprentice", reason: seniority }
   - { name: "Trainee", reason: seniority }
+  # DACH — apprenticeships / dual-study / working-student patterns.
+  # `match: substring` because these words inflect.
+  - { name: "Ausbildung",            reason: seniority, match: substring }
+  - { name: "Auszubildende",         reason: seniority, match: substring }
+  - { name: "Azubi",                 reason: seniority, match: substring }
+  - { name: "Duales Studium",        reason: seniority, match: substring }
+  - { name: "Dualer Student",        reason: seniority, match: substring }
+  - { name: "Studentische Hilfskraft", reason: seniority, match: substring }
+  - { name: "Studierende",           reason: seniority, match: substring }
+  - { name: "Umschulung",            reason: seniority, match: substring }
+  - { name: "Weiterbildung",         reason: seniority, match: substring }
+  - { name: "Praktikant",            reason: seniority, match: substring }
+  - { name: "Praktikum",             reason: seniority, match: substring }
+  - { name: "Werkstudent",           reason: seniority, match: substring }
   - { name: ".NET", reason: wrong-tech }
   - { name: "C#", reason: wrong-tech }
   - { name: "iOS", reason: wrong-tech }
