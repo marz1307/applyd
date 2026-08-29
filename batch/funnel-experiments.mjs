@@ -74,8 +74,12 @@ export function cohortOf(row) {
 // subject after seeing which way it went is precisely how an experiment lies,
 // so the enrolment date, the exclusion date and the reason all stay on the
 // row where anyone re-reading it can see what was dropped and why.
-const exclRe = (kind) => new RegExp(`\\[exp-${kind} (\\d{4}-\\d{2}-\\d{2}) EXCLUDED (\\d{4}-\\d{2}-\\d{2}): ([^\\]]*)\\]`);
-const headRe = (kind) => new RegExp(`\\[exp-${kind} (\\d{4}-\\d{2}-\\d{2})\\]`);
+// kind is a controlled cohort slug (e.g. "mkt-a") — but escape it anyway so a
+// malformed --exclude argument (or a future caller passing a regex-metachar
+// through cohortOf) can't turn either regex into a ReDoS pattern.
+const escRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const exclRe = (kind) => new RegExp(`\\[exp-${escRe(kind)} (\\d{4}-\\d{2}-\\d{2}) EXCLUDED (\\d{4}-\\d{2}-\\d{2}): ([^\\]]*)\\]`);
+const headRe = (kind) => new RegExp(`\\[exp-${escRe(kind)} (\\d{4}-\\d{2}-\\d{2})\\]`);
 
 export function exclusionOf(row, kind) {
   const m = exclRe(kind).exec(String(row.fit_notes || ''));
