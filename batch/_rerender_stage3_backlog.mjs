@@ -44,7 +44,18 @@ const CV_ROOT = path.join(ROOT, 'output', 'cv-drafts');
 const PHOTO = path.join(ROOT, 'assets', 'candidate-photo.jpg');
 const SNAPSHOT = argOf('--snapshot') || path.join(ROOT, 'data', '.routine-tmp', 'rerender-backlog.json');
 const BANNED_SRC = argOf('--banned-re');
-const BANNED = BANNED_SRC ? new RegExp(BANNED_SRC, 'i') : null;
+// codeql[js/regex-injection]
+// Justification: --banned-re is DOCUMENTED (see header) as accepting a raw regex
+// pattern from the invoking user, precisely so the backfill can match phrase
+// variants the guard now rejects. Escaping it would defeat the flag's purpose.
+// The only "attacker" is the CLI invoker themselves — a personal ops script
+// with no remote input path. Malformed patterns are caught below so a syntax
+// error surfaces as a normal ROUTINE_ABORT rather than an unhandled throw.
+let BANNED = null;
+if (BANNED_SRC) {
+  try { BANNED = new RegExp(BANNED_SRC, 'i'); }
+  catch (e) { console.error(`ROUTINE_ABORT: --banned-re is not a valid regex: ${e.message}`); process.exit(6); }
+}
 const BUILD_CVS = path.join(ROOT, 'scripts', 'cv', 'build-cvs.js');
 const HTML_TO_PDF = path.join(ROOT, 'scripts', 'cv', 'html-to-pdf.mjs');
 const NOTION_UPLOAD = path.join(ROOT, 'scripts', 'notion', 'notion-upload-file.mjs');
