@@ -78,7 +78,7 @@ const ENGLISH_COUNTRY = /^(uk|gb|united kingdom|great britain|england|scotland|w
 
 // Job-board hosts that unambiguously denote an English-language posting locale.
 // The job_url is ground truth: the Notion Country / Language fields can be
-// mis-tagged from the search query rather than the posting (APP-1564 / JCB,
+// mis-tagged from the search query rather than the posting (observed on
 // 2026-07-08 — Country was wrongly "Germany" and Language "DE" on a
 // uk.linkedin.com UK posting, so a German Lebenslauf was rendered for an
 // English UK role). Keying `en` on these hosts is safe: a genuinely German

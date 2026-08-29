@@ -4,10 +4,10 @@
  *
  * Usage:
  *   node cv/cv-qa.mjs \
- *     --cv    output/cv-drafts/APP-2448-munich-re/cv_da_en.html \
- *     --cl    output/cover-letters/APP-2448-munich-re-2026-06-14.md \
+ *     --cv    output/cv-drafts/APP-XXXX-example-corp/cv_da_en.html \
+ *     --cl    output/cover-letters/APP-XXXX-example-corp-2026-01-01.md \
  *     --jd    "full JD text" \
- *     --company "Munich Re" \
+ *     --company "Example Corp" \
  *     --role-title "BI Developer" \
  *     [--dry-run]      # evaluate but do NOT patch or write files
  *     [--json]         # emit JSON result to stdout (default: human-readable)
@@ -178,7 +178,7 @@ Read the JD tone, company type, sector, and seniority signals. Determine:
 - inferred_from: [list of signals you used]
 
 Examples:
-- Munich Re (reinsurance, formal JD, enterprise) → high / business-outcomes / strict
+- Large reinsurer / formal JD / enterprise → high / business-outcomes / strict
 - Booking.com analytics → low / technical-depth / standard
 - DACH Mittelstand → high / balanced / standard
 - Series B fintech → medium / technical-depth / relaxed

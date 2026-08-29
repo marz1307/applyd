@@ -55,7 +55,7 @@ Scan the **auth-walled and SPA-heavy portals** (LinkedIn, Xing, Stepstone, Indee
    **Company-name rule (locked 2026-05-30).** The `Company` field is recruiter-facing in Notion — it must be the **actual employer** or an honest "Undisclosed (Xing)" placeholder. Never put any of the following in `Company`:
    - Job titles (e.g. `Data Engineer (f/m/x) — Wien`, `Data Scientist (w/m/d) — Hamburg`)
    - Aggregator / SERP descriptors (e.g. `Xing posting — Hamburg DS`)
-   - Recruiter-chain labels (e.g. `Jobriver / freenet`, `HEADMATCH`) UNLESS the recruiter IS the underlying employer
+   - Recruiter-chain labels (e.g. `Jobriver / <employer>`, `HEADMATCH`) UNLESS the recruiter IS the underlying employer
    For Xing / Stepstone / Indeed rows where the SERP snippet shows a recruiter agency (apsa, Hays, Jobriver, HEADMATCH, Page Group, Robert Half, Michael Page) but NOT the underlying employer, set `Company` to `"Undisclosed ({Portal})"` and stash the recruiter name in `Fit notes` as `recruiter={name}`. The downstream `auto-eval` step fetches the JD detail page and pulls `hiringOrganization` from JSON-LD; it then PATCHes the real Company name. Better to write "Undisclosed" than a wrong name — wrong names propagate into PDFs and recruiter-facing messages.
 
 7. **Log each BD call** to `data/scan-history.tsv` with `method=bright-data` for spend audit.

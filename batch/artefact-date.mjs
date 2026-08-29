@@ -132,9 +132,9 @@ if (IS_MAIN && process.argv.includes('--self-test')) {
   };
 
   // --- filename matching
-  check('bare numeric prefix matches', fileMatchesApp('101-acme-2026-06-18.md', 'APP-101'), true);
-  check('APP- prefix matches', fileMatchesApp('APP-2602-acme-2026-07-01.md', 'APP-2602'), true);
-  check('zero padding matches', fileMatchesApp('0054-acme-2026-06-18.md', 'APP-54'), true);
+  check('bare numeric prefix matches', fileMatchesApp('101-example-2026-06-18.md', 'APP-101'), true);
+  check('APP- prefix matches', fileMatchesApp('APP-1234-example-2026-07-01.md', 'APP-1234'), true);
+  check('zero padding matches', fileMatchesApp('0054-example-2026-06-18.md', 'APP-54'), true);
   // The bug this guards: a prefix match without the trailing hyphen makes
   // APP-101 swallow every artefact of APP-1010 through APP-1019.
   check('longer id is NOT matched', fileMatchesApp('1010-other-2026-06-18.md', 'APP-101'), false);
@@ -169,13 +169,13 @@ if (IS_MAIN && process.argv.includes('--self-test')) {
   // --- row resolution
   const rows = [
     { application_id: 'APP-101', discovered_date: '2026-05-25', response_date: null },
-    { application_id: 'APP-4894', discovered_date: '2026-08-04', response_date: '2026-08-07' },
+    { application_id: 'APP-5678', discovered_date: '2026-08-04', response_date: '2026-08-07' },
     { application_id: 'APP-999', discovered_date: '2026-08-01', response_date: null },
   ];
   const files = ['101-a-2026-06-18.md', '101-a-2026-07-01.md', '4894-b-2026-08-05.md', '4894-b-2026-08-13.md'];
   const m = resolveForRows(rows, files, '2026-08-28');
   check('resolveForRows picks latest', m.get('APP-101'), '2026-07-01');
-  check('resolveForRows applies the response cap', m.get('APP-4894'), '2026-08-05');
+  check('resolveForRows applies the response cap', m.get('APP-5678'), '2026-08-05');
   check('a row with no artefacts is absent', m.has('APP-999'), false);
 
   console.log(`\nartefact-date self-test: ${pass} passed, ${fail} failed`);

@@ -12,7 +12,7 @@ import { classifyLiveness, isWithdrawable } from './liveness-core.mjs';
 const body = (s, n = 3000) => s + ' '.repeat(0) + 'x'.repeat(n);
 
 test('LinkedIn states expiry in the redirect, not the body', () => {
-  // APP-3431 (King) sat in the pipeline as alive on a 30,705-char body. The
+  // A tracked row sat in the pipeline as alive on a 30,705-char body. The
   // body was a normal search-results page with no expiry wording anywhere; the
   // ONLY signal was the 301 target's query string. Length checks, apply-text
   // checks and expired-phrase checks all pass on a page like this.
@@ -26,8 +26,8 @@ test('LinkedIn states expiry in the redirect, not the body', () => {
 });
 
 test('LinkedIn expired shell is a results page, not an advert', () => {
-  // APP-4425 (Awaze), 38,367 chars. Serving MORE content than a real advert is
-  // exactly why size cannot be a liveness signal.
+  // Observed on a tracked row at 38,367 chars. Serving MORE content than a
+  // real advert is exactly why size cannot be a liveness signal.
   const r = classifyLiveness({
     status: 200,
     finalUrl: 'https://www.linkedin.com/jobs/view/4441802908',

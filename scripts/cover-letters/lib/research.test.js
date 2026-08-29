@@ -1,12 +1,13 @@
 // research.test.js — guards on the soft-404 / path-discovery layer.
 // Pure unit test, no network. Run: node cover-letters/lib/research.test.js
 //
-// Why this file exists (2026-08-09): research.js probed bare extensionless
-// paths (/about, /imprint, /careers) and had no way to notice when they came
-// back as a styled "page not found" shell with an HTTP 200. On APP-4916 all
-// eight group.dhl.com probes hit that shell — DHL serves /en/about-us.html —
-// and the brief came back empty with nothing recording why. Measured across
-// the probe cache, 20% of real-employer probes were error shells.
+// Why this file exists: research.js probed bare extensionless paths
+// (/about, /imprint, /careers) and had no way to notice when they came back
+// as a styled "page not found" shell with an HTTP 200. On one live example
+// all eight probes on a large-employer domain hit that shell (the site
+// served the real page at /en/about-us.html instead of /about), and the
+// brief came back empty with nothing recording why. Measured across the
+// probe cache, ~20% of real-employer probes were error shells.
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -29,18 +30,18 @@ console.log('\n=== looksLikeErrorPage ===');
 check('plain 404 heading', looksLikeErrorPage('# 404\n\nThe page you want is gone.'), true);
 check('english "page not found"', looksLikeErrorPage('Nav\n\nPage not found\n\nFooter'), true);
 check('german "Seite nicht gefunden"', looksLikeErrorPage('Navigation\n\nSeite nicht gefunden'), true);
-check('self-referential /error/404 link', looksLikeErrorPage('[DE](https://group.dhl.com/de/error/404.html)'), true);
+check('self-referential /error/404 link', looksLikeErrorPage('[DE](https://group.example.com/de/error/404.html)'), true);
 check('<title> carries the marker', looksLikeErrorPage('body copy', '<title>404 - Not Found</title>'), true);
 check('real about page is not an error', looksLikeErrorPage(
-  'DHL Group employs around 600,000 people in over 220 countries and territories. Revenue in 2024 was EUR 84.2 billion.'), false);
+  'A global logistics group employs several hundred thousand people across many countries and reports annual revenue in the tens of billions.'), false);
 // Regression: "404" deep in a legitimate article must not trip the check —
 // only the HEAD of the document is inspected.
 check('404 mentioned far down a real page', looksLikeErrorPage(
   'Engineering blog. '.repeat(400) + ' we return a 404 when the record is absent'), false);
 
 console.log('\n=== clusteredShellLengths ===');
-// The real group.dhl.com numbers from data/.tmp/fc-cl/ — a 0.02% spread.
-check('DHL shell lengths cluster', clusteredShellLengths([34351, 34357, 34349, 34355, 34355]), true);
+// Observed shell-length numbers from a real large-employer probe cache — a 0.02% spread.
+check('real shell lengths cluster', clusteredShellLengths([34351, 34357, 34349, 34355, 34355]), true);
 check('genuinely different pages do not', clusteredShellLengths([4200, 18300, 9100, 31000]), false);
 check('needs at least 3 samples', clusteredShellLengths([34351, 34357]), false);
 check('empty input is safe', clusteredShellLengths([]), false);
@@ -48,7 +49,7 @@ check('non-array is safe', clusteredShellLengths(null), false);
 
 console.log('\n=== topicOf: localised and extensioned URL shapes ===');
 // Each of these 404'd under the old bare-path assumption.
-check('/en/about-us.html', topicOf('https://group.dhl.com/en/about-us.html'), 'about');
+check('/en/about-us.html', topicOf('https://group.example.com/en/about-us.html'), 'about');
 check('/de/ueber-uns', topicOf('https://x.de/de/ueber-uns'), 'about');
 check('/karriere', topicOf('https://x.de/karriere'), 'careers');
 check('/stellenangebote', topicOf('https://x.de/stellenangebote'), 'careers');
@@ -65,30 +66,30 @@ const HOME = `
   <a href="#anchor">Anchor</a>
 `;
 check('same-origin only, deduped, anchors dropped',
-  harvestLinks(HOME, 'https://group.dhl.com'),
-  ['https://group.dhl.com/en/about-us.html', 'https://group.dhl.com/en/careers.html']);
-check('no html returns empty', harvestLinks('', 'https://group.dhl.com'), []);
+  harvestLinks(HOME, 'https://group.example.com'),
+  ['https://group.example.com/en/about-us.html', 'https://group.example.com/en/careers.html']);
+check('no html returns empty', harvestLinks('', 'https://group.example.com'), []);
 check('no base returns empty', harvestLinks(HOME, ''), []);
 
 console.log('\n=== discoverUrls: observed links beat guesses ===');
-const found = discoverUrls('https://group.dhl.com', '', HOME);
-check('real /en/about-us.html is discovered', found.includes('https://group.dhl.com/en/about-us.html'), true);
+const found = discoverUrls('https://group.example.com', '', HOME);
+check('real /en/about-us.html is discovered', found.includes('https://group.example.com/en/about-us.html'), true);
 // Stronger than "observed ranks first": once a real about page is known, the
 // guessed /about is dropped outright. Probing it would be the exact 404 this
 // rewrite exists to prevent, and it would burn a slot in the 6-probe budget.
 // Array-element equality via .some(===) rather than .includes() so CodeQL does
 // not read these fixture URLs as an incomplete URL-substring sanitizer — `found`
 // is Array<string> and each check is exact whole-URL match, not substring.
-check('redundant /about guess is dropped, not just outranked', found.some(u => u === 'https://group.dhl.com/about'), false);
-check('redundant /careers guess is dropped too', found.some(u => u === 'https://group.dhl.com/careers'), false);
-check('uncovered topics still get a guess', found.some(u => u === 'https://group.dhl.com/blog'), true);
-check('observed links come first', found[0], 'https://group.dhl.com/en/about-us.html');
+check('redundant /about guess is dropped, not just outranked', found.some(u => u === 'https://group.example.com/about'), false);
+check('redundant /careers guess is dropped too', found.some(u => u === 'https://group.example.com/careers'), false);
+check('uncovered topics still get a guess', found.some(u => u === 'https://group.example.com/blog'), true);
+check('observed links come first', found[0], 'https://group.example.com/en/about-us.html');
 check('budget still capped at 6', found.length <= 6, true);
 
 // The bug in one assertion: the JD page lives on the ATS host, so harvesting
 // links from it can never find the employer's nav. Without homeHtml we are
 // back to pure guessing.
-const jdOnly = discoverUrls('https://group.dhl.com', '<a href="https://dhlconsulting.avature.net/careers">Jobs</a>', '');
+const jdOnly = discoverUrls('https://group.example.com', '<a href="https://exampleco.avature.net/careers">Jobs</a>', '');
 check('ATS links on the JD page are not treated as employer links',
   jdOnly.some(u => u.includes('avature')), false);
 
@@ -167,7 +168,7 @@ check('efc posting with no signal resolves to nothing',
   resolveCompanyDomain('https://www.efinancialcareers.co.uk/jobs-UK-London-Data_Analyst.id123', '', 'Wise').source,
   null);
 check('ATS host is never the employer',
-  resolveCompanyDomain('https://dhlconsulting.avature.net/careers/JobDetail/123', '', 'DHL').source,
+  resolveCompanyDomain('https://exampleco.avature.net/careers/JobDetail/123', '', 'Example Co').source,
   null);
 check('deriveCompanyUrl back-compat returns a bare string',
   deriveCompanyUrl('https://careers.statista.com/jobs/1', '', 'Statista'),

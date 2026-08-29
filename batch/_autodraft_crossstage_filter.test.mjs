@@ -45,7 +45,7 @@ test('normCompany / sameCompany: legal-form noise does not split an employer', (
   assert.ok(sameCompany(normCompany('Immediate'), normCompany('Immediate Media Co')));
   // Unrelated employers must stay apart, and containment is prefix-only so a
   // shared trailing word cannot merge two companies.
-  assert.ok(!sameCompany(normCompany('ASOS.com'), normCompany('Awaze')));
+  assert.ok(!sameCompany(normCompany('Example Retail'), normCompany('Sample Travel')));
   assert.ok(!sameCompany(normCompany('Sony Interactive'), normCompany('Interactive Brokers')));
 });
 
@@ -93,7 +93,7 @@ test('isAgency: a consultancy is not one employer twice', () => {
   assert.ok(isAgency('Harnham'));
   assert.ok(isAgency('Burns Sheehan'));
   assert.ok(isAgency('Morgan McKinley'));
-  assert.ok(!isAgency('freenet DLS GmbH'));
+  assert.ok(!isAgency('Placeholder GmbH'));
   assert.ok(!isAgency('Zalando'));
   assert.ok(!isAgency(''));
 });

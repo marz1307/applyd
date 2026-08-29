@@ -693,7 +693,7 @@ async function research({ jobUrl, companyUrl, roleHint, appId, companyHint, jdTe
   // Garbage-title guard. A wall/cookie/challenge page title is NOT a job title.
   const GARBAGE_TITLE_RE = /sign in|log ?in|job alerts?|create alert|cookies?|consent|just a moment|attention required|access denied|quick check|verify|captcha|page not found|404|logo\b|welcome to the jungle|find your next|stellenangebote?$|^jobs?\b|^careers?\b|scheduled maintenance|maintenance\b|traumjob|xing premium|premium entdecken|seite l[aä]dt|bitte warten|internet explorer|no longer supported|daily adventures|will include/i;
   // Branding-as-title guard. An ATS host's own site branding gets picked up as
-  // the "job title" ("DHL Consulting" on dhlconsulting.avature.net). The tell
+  // the "job title" ("<Employer> Consulting" on <employer>consulting.avature.net). The tell
   // is that it IS the host's brand label, or the employer's own name. A job
   // title is never either of those.
   const flatten = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');

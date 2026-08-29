@@ -13,7 +13,7 @@ const HARD_EXPIRED_PATTERNS = [
   /closed on \d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i,
   /closed on (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}/i,
   /diese stelle (ist )?(nicht mehr|bereits) besetzt/i,
-  // Xing's dead-advert page. Observed 2026-08-16 on APP-3804, which was only
+  // Xing's dead-advert page. Observed once on a tracked row that was only
   // caught because Xing happened to also return 410 — the text is the reliable
   // signal, the status code is not guaranteed.
   /dieses stellenangebot existiert nicht/i,
@@ -26,9 +26,9 @@ const LISTING_PAGE_PATTERNS = [
   // LinkedIn's expired-advert shell. It does NOT say the job is gone — it
   // silently serves a full search-results page, ~30-38k chars of real content,
   // which reads as a healthy advert on every length- and apply-text-based check.
-  // APP-4425 (Awaze) and APP-3431 (King) both sat in the pipeline as "alive"
-  // for weeks on 30k+ char bodies. This line only ever appears at the bottom of
-  // a results list, never on a single advert.
+  // Two tracked rows sat in the pipeline as "alive" for weeks on 30k+ char
+  // bodies before this pattern was added. This line only ever appears at the
+  // bottom of a results list, never on a single advert.
   /you.ve viewed all jobs for this search/i,
 ];
 
@@ -38,8 +38,9 @@ const EXPIRED_URL_PATTERNS = [
   // expired advert 301s to a role-search page carrying `trk=expired_jd_redirect`.
   // That is the platform's own machine-readable marker, and it is far more
   // reliable than anything in the rendered text — the page it lands on is a
-  // normal search page with no expiry wording at all. APP-3431 (King) was
-  // classified alive on a 30,705-char body that was exactly this redirect.
+  // normal search page with no expiry wording at all. A tracked row was
+  // classified alive on a 30,705-char body that was exactly this redirect
+  // before the pattern was added.
   /[?&]trk=expired_jd_redirect/i,
 ];
 

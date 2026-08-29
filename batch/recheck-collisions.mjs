@@ -171,12 +171,12 @@ if (args.includes('--self-test')) {
 
   // A collision with a 3-day-old rejection.
   const fc = [
-    row('APP-5812', 'Acme Bank', '3. Drafted', 'London EC4V'),
-    row('APP-5378', 'Acme Bank UK', 'Rejected', 'London, England, United Kingdom', { response_date: '2026-08-20' }),
+    row('APP-1001', 'Acme Bank', '3. Drafted', 'London EC4V'),
+    row('APP-1002', 'Acme Bank UK', 'Rejected', 'London, England, United Kingdom', { response_date: '2026-08-20' }),
   ];
   const f1 = findCollisions(fc, T);
   check('the Drafted row collides with a fresh rejection', f1.map((f) => [f.app, f.reason, f.severity, f.collides_with]),
-    [['APP-5812', 'recent-rejection-collision', 'block', 'APP-5378']]);
+    [['APP-1001', 'recent-rejection-collision', 'block', 'APP-1002']]);
 
   // The postcode is the reason the city had to match; prove it directly.
   check('normCity strips a UK outcode', normCity('London EC4V'), 'london');

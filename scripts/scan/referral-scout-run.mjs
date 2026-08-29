@@ -69,7 +69,12 @@ const queue = missing.sort((a, b) => (b.match_score || 0) - (a.match_score || 0)
 const STAFFING = /\b(consult|recruit|staffing|staffed|personnel|resourc|talent|hays|harnham|michael\s*page|robert\s*half|randstad|hunter|search\s*partners?|manpower|xcede|nigel\s*frank|la\s*fosse|franklin\s*fitch|austin\s*fraser|huxley|computer\s*futures|signify\s*technology|sthree|oscar\s*technology|trust\s*in\s*soda|salt\s*digital|understanding\s*recruitment)\b/i;
 const UNDISCLOSED = /undisclosed|efinancialcareers/i;
 const MS_ADJ = /\b(sap|siemens|microsoft)\b/i;
-const ENTERPRISE = /\b(sap|siemens|goldman|abn\s*amro|allstate|delivery\s*hero|playstation|sony|booking|dkb|kreditbank|awin|nordex|jcb|aristocrat|flutter|deutsche|allianz|bank|insurance|hochbahn|affirm)\b/i;
+// ENTERPRISE recognises large-org employer names so the outreach classifier
+// can prefer a hiring-manager path over a founder-DM. Named brands are a
+// starter set — extend with your own market's giants in a local override.
+// (The generic word matches for `bank` and `insurance` catch most large-
+// employer tokens that don't appear by brand.)
+const ENTERPRISE = /\b(sap|siemens|goldman|sony|booking|deutsche|allianz|bank|insurance)\b/i;
 const MODERN_STACK = /\b(pigment|aily|trade\s*republic|checkout|trivago)\b/i;
 
 function companyOf(title) {

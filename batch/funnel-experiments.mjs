@@ -26,10 +26,10 @@
 //
 // Usage:
 //   node batch/funnel-experiments.mjs --status
-//   node batch/funnel-experiments.mjs --enrol warm     APP-4162,APP-5477 [--apply]
-//   node batch/funnel-experiments.mjs --enrol feedback APP-5450,APP-3967 [--apply]
-//   node batch/funnel-experiments.mjs --exclude warm   APP-4662 --why "reason" [--apply]
-//   node batch/funnel-experiments.mjs --unexclude warm APP-5171 --why "reason" [--apply]
+//   node batch/funnel-experiments.mjs --enrol warm     APP-1000,APP-1001 [--apply]
+//   node batch/funnel-experiments.mjs --enrol feedback APP-1002,APP-1003 [--apply]
+//   node batch/funnel-experiments.mjs --exclude warm   APP-1000 --why "reason" [--apply]
+//   node batch/funnel-experiments.mjs --unexclude warm APP-1000 --why "reason" [--apply]
 //   node batch/funnel-experiments.mjs --self-test
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';

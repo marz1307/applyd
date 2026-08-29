@@ -703,12 +703,12 @@ export function companyRoleFingerprint(row, { includeLocation = true } = {}) {
 /* ── advert-identity fingerprint ─────────────────────────────────────────────
  *
  * `companyRoleFingerprint` cannot see one class of duplicate: the SAME advert
- * reached by two URLs, filed under two different role labels. APP-4943 and
- * APP-4339 were both eFC advert id24578904 ("Data Platform Engineer"), recorded
- * as "Analytics Engineer" and "Data Engineer" — role differs, so the semantic
- * fingerprint splits them, and the URL strings differ, so URL-key dedup splits
- * them too. Locale pairs are the same class: `jobs.siemens.com/en_US/.../518024`
- * and `/de_DE/.../518024` are one job.
+ * reached by two URLs, filed under two different role labels. Real example
+ * observed on eFC: one advert id was recorded under two rows as "Analytics
+ * Engineer" and "Data Engineer" — role differs, so the semantic fingerprint
+ * splits them, and the URL strings differ, so URL-key dedup splits them too.
+ * Locale pairs are the same class: `jobs.<employer>.com/en_US/.../<id>` and
+ * `/de_DE/.../<id>` are one job.
  *
  * The id is ALWAYS namespaced by portal, never used bare. This corpus already
  * contains the collision that proves it necessary: advert `100234` exists on

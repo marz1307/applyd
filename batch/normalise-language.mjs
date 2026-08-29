@@ -104,7 +104,7 @@ if (args.includes('--self-test')) {
   check('no marker -> null, never a guess', languageOfLetter('some notes with no salutation'), null);
   // The picker must return the newest by DATE, not alphabetically.
   check('newest letter by date not prefix',
-    newestLetter(['APP-4112-acme-2026-07-25.md', '4112-acme-2026-08-03.md'], '4112'),
+    newestLetter(['APP-1234-example-2026-07-25.md', '1234-example-2026-08-03.md'], '1234'),
     '4112-acme-2026-08-03.md');
   check('no letter -> null', newestLetter(['9999-x-2026-01-01.md'], '4112'), null);
 

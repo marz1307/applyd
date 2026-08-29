@@ -48,7 +48,7 @@ function expectGerman(country, language) {
 }
 
 // Cross-check the Country field against strong DACH signals. A mis-tagged
-// country (e.g. APP-2557 was "UK" for a Nürnberg/Xing/GmbH role) silently
+// country (real example: a Nürnberg/Xing/GmbH role recorded as "UK") silently
 // suppresses LANG_MISMATCH, so flag rows whose signals contradict the field.
 // Requires >=2 independent German signals to avoid false positives (a German
 // firm hiring in London shows only the entity-suffix signal, not a city).
@@ -133,8 +133,9 @@ function main() {
         const html = readFileSync(cv, 'utf8');
         // Markup integrity: a CV whose HTML tags were stripped to plain text still
         // contains the section WORDS, so the section check below passes — but it
-        // renders as an unstyled text dump. Require real structure. (APP-2630: the
-        // auto-draft wrote the CV as tag-less text.)
+        // renders as an unstyled text dump. Require real structure. (Observed
+        // failure mode: auto-draft wrote the CV as tag-less text after a cv-qa
+        // patch stripped the markup, and the subsequent section check passed.)
         if (!/<!doctype/i.test(html) || !/<h2[\s>]/i.test(html) || !/<p[\s>]/i.test(html)) {
           add(r.application_id, 'CV_UNSTYLED', `CV HTML lost its markup (renders as plain text): ${base}`);
         }

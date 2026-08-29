@@ -310,7 +310,7 @@ function selfTest() {
   // Attribution is by URL, never by SERP title.
   const empJobs = PORTALS.employers.extract(
     '[Data Engineer (All genders)](https://jobs.zalando.com/en/jobs/2724318-Data-Engineer-(All-genders))\n' +
-    '[Claims Data Scientist in London at Munich Re](https://careers.munichre.com/en/job/london/claims-data-scientist/3342/41711207168)\n' +
+    '[Claims Data Scientist in London at Example Reinsurer](https://careers.example.com/en/job/london/claims-data-scientist/3342/41711207168)\n' +
     '[Lead Data Engineer @ Klarna](https://jobs.deel.com/klarna/job-details/846a362f-2e03-4054-91cb-bf8ee87d3f34/overview)\n' +
     '[How we work at data.works - Meet Sven](https://www.otto.de/jobs/en/blogs/techblog/how-we-work-at-data-works-meet-sven/)\n' +
     '[Data Engineer at Some Other Firm](https://www.stepstone.de/stellenangebote--Data-Engineer--123456-inline.html)',
@@ -323,7 +323,7 @@ function selfTest() {
   // ")" and yields a 404 that looks like a healthy row. Assert the whole URL.
   ok(zal && zal.url === "https://jobs.zalando.com/en/jobs/2724318-Data-Engineer-(All-genders)",
      "employers: parenthesised Zalando URL is captured whole, not truncated");
-  const mre = empJobs.find(j => j.company === "Munich Re");
+  const mre = empJobs.find(j => j.company === "Example Reinsurer");
   ok(mre && mre.title === "Claims Data Scientist" && /London/.test(mre.location),
      "employers: 'Role in City at Unit' splits into title + location");
   const kla = empJobs.find(j => j.company === "Klarna");
@@ -1068,7 +1068,7 @@ const PORTALS = {
         re: /https?:\/\/careers\.telekom\.com\/[a-z]{2}\/jobs\/[^\s)]+/gi,                     strip: /\s*\|\s*Global Career Website.*$/i },
       { company: "adesso SE",        site: "jobs.adesso-group.com/job",        countries: ["Germany", "Austria"],
         re: /https?:\/\/jobs\.adesso-group\.com\/job[^\s)]+/gi,                                strip: /\s*(Stellendetails|Job Details).*$/i },
-      { company: "Munich Re",        site: "careers.munichre.com/en/job",      countries: ["Germany", "United Kingdom"],
+      { company: "Example Reinsurer", site: "careers.example.com/en/job",       countries: ["Germany", "United Kingdom"],
         re: /https?:\/\/careers\.munichre\.com\/[a-z]{2}\/job\/[^\s)]+/gi,                     strip: null },
       { company: "Otto Group",       site: "otto.de/jobs/de/stellenangebote",  countries: ["Germany"],
         re: /https?:\/\/www\.otto\.de\/jobs\/de\/stellenangebote\/[^\s)]+/gi,                  strip: null },
@@ -1121,7 +1121,7 @@ const PORTALS = {
         seen.add(cu);
         let title = site.strip ? rawTitle.replace(site.strip, "").trim() : rawTitle;
         // Several of these boards render "Role in {City}[, Country][ at {Unit}]"
-        // (Munich Re, Booking.com). Pull the city out rather than leaving it in
+        // (large-enterprise careers portals with city-in-URL). Pull the city out rather than leaving it in
         // the title, where it would fight the role-taxonomy title filter.
         let location = country;
         const inAt = title.match(/^(.*?)\s+in\s+([^,]+?)(?:,\s*([^,]+?))?(?:\s+at\s+(.+))?$/i);
@@ -1893,8 +1893,9 @@ if (enrichmentQueue.length > 0) {
 // Xing and StepStone-DE are DACH-EXCLUSIVE boards: their jobs are always in
 // DE/AT/CH regardless of which search query surfaced them. `job._country` comes
 // from the SEARCH meta, so a Xing job found under a "UK" query gets mis-tagged
-// UK (the source of APP-2557/2196/2198/2204/2207/2242). Override from the URL
-// city for those boards. cv/writing-eval.mjs COUNTRY_SUSPECT is the back-stop.
+// UK (observed on multiple tracked rows before this override). Override from
+// the URL city for those boards. cv/writing-eval.mjs COUNTRY_SUSPECT is the
+// back-stop.
 // ─── Country + position + Stage-1 write: SHARED, see notion-stage1.mjs ───
 // These six functions (dachCountryFromUrl, normCountry, countryFromLocation,
 // resolveCountry, inferPosition, notionCreatePage) lived here and ONLY here,
