@@ -40,7 +40,10 @@
     "dedup:cross-portal": "node scripts/scan/cross-portal-dedup.mjs",
     "wttj:refresh": "node scripts/scan/wttj-sitemap-refresh.mjs",
     "bd:scan": "node scripts/scan/bd-bulk-scan.mjs",
-    "bd:referral": "node scripts/scan/bd-referral-scout.mjs"
+    "bd:referral": "node scripts/scan/bd-referral-scout.mjs",
+    "outreach": "node scripts/outreach.mjs",
+    "outreach:report": "node scripts/outreach.mjs --report",
+    "outreach:due": "node scripts/outreach.mjs --due"
   },
   "keywords": [
     "ai",

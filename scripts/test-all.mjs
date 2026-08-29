@@ -79,6 +79,8 @@ const scripts = [
   { name: 'scripts/cv/profile-enrich.test.mjs', expectExit: 0 },
   { name: 'scripts/test-build-cvs-smoke.mjs', expectExit: 0 },
   { name: 'scripts/system-eval.test.mjs', expectExit: 0 },
+  { name: 'scripts/outreach.mjs --self-test', expectExit: 0 },
+  { name: 'batch/funnel-experiments.mjs --self-test', expectExit: 0 },
   { name: 'batch/_autodraft_cv_run.test.mjs', expectExit: 0 },
   { name: 'batch/_autodraft_crossstage_filter.test.mjs', expectExit: 0 },
   { name: 'scripts/email/match.test.mjs', expectExit: 0 },
