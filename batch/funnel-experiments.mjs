@@ -28,6 +28,8 @@
 //   node batch/funnel-experiments.mjs --status
 //   node batch/funnel-experiments.mjs --enrol warm     APP-4162,APP-5477 [--apply]
 //   node batch/funnel-experiments.mjs --enrol feedback APP-5450,APP-3967 [--apply]
+//   node batch/funnel-experiments.mjs --exclude warm   APP-4662 --why "reason" [--apply]
+//   node batch/funnel-experiments.mjs --unexclude warm APP-5171 --why "reason" [--apply]
 //   node batch/funnel-experiments.mjs --self-test
 import process from 'node:process';
 import { execFileSync } from 'node:child_process';
@@ -63,6 +65,61 @@ export function cohortOf(row) {
   return out;
 }
 
+// -- Exclusion ---------------------------------------------------------------
+// Some enrolled rows can never produce a result: the posting died, or no human
+// could be found to do the outreach to. Leaving them in inflates the
+// denominator with rows the intervention was never actually performed on.
+//
+// They are marked EXCLUDED IN PLACE rather than untagged. Quietly deleting a
+// subject after seeing which way it went is precisely how an experiment lies,
+// so the enrolment date, the exclusion date and the reason all stay on the
+// row where anyone re-reading it can see what was dropped and why.
+const exclRe = (kind) => new RegExp(`\\[exp-${kind} (\\d{4}-\\d{2}-\\d{2}) EXCLUDED (\\d{4}-\\d{2}-\\d{2}): ([^\\]]*)\\]`);
+const headRe = (kind) => new RegExp(`\\[exp-${kind} (\\d{4}-\\d{2}-\\d{2})\\]`);
+
+export function exclusionOf(row, kind) {
+  const m = exclRe(kind).exec(String(row.fit_notes || ''));
+  return m ? { enrolled: m[1], excluded: m[2], reason: m[3] } : null;
+}
+
+/** Cohorts this row still counts towards. An excluded row is tagged but not counted. */
+export function liveCohortOf(row) {
+  return cohortOf(row).filter((k) => !exclusionOf(row, k));
+}
+
+export function markExcluded(notes, kind, dateISO, reason) {
+  const s = String(notes ?? '');
+  if (!TAGS[kind]) return { ok: false, why: `unknown cohort "${kind}"`, text: s };
+  if (!s.includes(TAGS[kind])) return { ok: false, why: `not enrolled in ${kind}`, text: s };
+  if (exclusionOf({ fit_notes: s }, kind)) return { ok: false, why: `already excluded from ${kind}`, text: s };
+  if (!reason || !String(reason).trim()) return { ok: false, why: 'an exclusion needs a reason — a silent drop is how an experiment lies', text: s };
+  if (/[[\]]/.test(reason)) return { ok: false, why: 'the reason cannot contain square brackets — it would break the sentinel', text: s };
+  if (!headRe(kind).test(s)) return { ok: false, why: 'the sentinel is not in the known shape — refusing to guess at the edit', text: s };
+  const out = s.replace(headRe(kind), `[exp-${kind} $1 EXCLUDED ${dateISO}: ${String(reason).trim()}]`);
+  // Fit notes carries sentinels other passes depend on. Never trade one for another.
+  const lost = ['[blocks', '[auto-draft', '[referral-scout', '[collision-ruled', 'no-warm-path', '[chase', '[interview-prep']
+    .filter((t) => s.includes(t) && !out.includes(t));
+  if (lost.length) return { ok: false, why: `the edit would drop other sentinels: ${lost.join(', ')}`, text: s };
+  return { ok: true, text: out };
+}
+
+/**
+ * Reverse an exclusion whose stated reason turned out to be false.
+ *
+ * This is NOT a way to re-admit a subject because you liked its outcome
+ * better in. It exists because an exclusion carries a factual claim, and a
+ * claim can be wrong: a row excluded for "no contact findable at this
+ * employer" can be re-admitted if a proper re-search then finds one. Leaving
+ * the row out on a disproven premise would be its own kind of lie.
+ */
+export function markUnexcluded(notes, kind) {
+  const s = String(notes ?? '');
+  if (!TAGS[kind]) return { ok: false, why: `unknown cohort "${kind}"`, text: s };
+  if (!exclusionOf({ fit_notes: s }, kind)) return { ok: false, why: `not excluded from ${kind}`, text: s };
+  const out = s.replace(exclRe(kind), `[exp-${kind} $1]`);
+  return { ok: true, text: out };
+}
+
 if (args.includes('--self-test')) {
   let pass = 0, fail = 0;
   const check = (n, got, want) => {
@@ -82,6 +139,35 @@ if (args.includes('--self-test')) {
   check('cohort read from the sentinel', cohortOf({ fit_notes: 'x [exp-warm 2026-08-25] y' }), ['warm']);
   check('both cohorts readable', cohortOf({ fit_notes: '[exp-warm ] [exp-feedback ]' }), ['warm', 'feedback']);
   check('no sentinel, no cohort', cohortOf({ fit_notes: 'nothing here' }), []);
+
+  // Exclusion. The trail must survive; the denominator must not.
+  const enrolled = '[exp-warm 2026-08-25] Real outreach first. [blocks A4 B5] no-warm-path';
+  const ex = markExcluded(enrolled, 'warm', '2026-08-29', 'application withdrawn');
+  check('an exclusion is written in place', ex.ok, true);
+  check('the enrolment date survives', /\[exp-warm 2026-08-25 EXCLUDED 2026-08-29: application withdrawn\]/.test(ex.text), true);
+  check('other sentinels survive the edit', /\[blocks A4 B5\] no-warm-path/.test(ex.text), true);
+  check('an excluded row is still tagged', cohortOf({ fit_notes: ex.text }), ['warm']);
+  check('an excluded row no longer counts', liveCohortOf({ fit_notes: ex.text }), []);
+  check('the reason is readable afterwards', exclusionOf({ fit_notes: ex.text }, 'warm').reason, 'application withdrawn');
+  check('the other cohort is untouched', exclusionOf({ fit_notes: ex.text }, 'feedback'), null);
+  check('a live row still counts', liveCohortOf({ fit_notes: enrolled }), ['warm']);
+  check('cannot exclude what was never enrolled', markExcluded('nothing here', 'warm', '2026-08-29', 'x').ok, false);
+  check('cannot exclude without a reason', markExcluded(enrolled, 'warm', '2026-08-29', '  ').ok, false);
+  check('a bracket in the reason is refused', markExcluded(enrolled, 'warm', '2026-08-29', 'see [note]').ok, false);
+  check('cannot exclude twice', markExcluded(ex.text, 'warm', '2026-08-30', 'again').ok, false);
+  check('a malformed sentinel is not guessed at', markExcluded('[exp-warm] no date', 'warm', '2026-08-29', 'x').ok, false);
+  check('excluding warm leaves feedback alone', liveCohortOf({
+    fit_notes: markExcluded('[exp-warm 2026-08-25] a [exp-feedback 2026-08-25] b', 'warm', '2026-08-29', 'dead').text,
+  }), ['feedback']);
+
+  // Un-exclusion: only for a disproven premise, and it must round-trip exactly.
+  const back = markUnexcluded(ex.text, 'warm');
+  check('an exclusion can be reversed', back.ok, true);
+  check('reversal restores the original enrolment exactly', back.text, enrolled);
+  check('the row counts again after reversal', liveCohortOf({ fit_notes: back.text }), ['warm']);
+  check('cannot un-exclude what was never excluded', markUnexcluded(enrolled, 'warm').ok, false);
+  check('cannot un-exclude an unknown cohort', markUnexcluded(ex.text, 'nonsense').ok, false);
+
   console.log(`\nfunnel-experiments self-test: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 }
@@ -128,23 +214,85 @@ async function main() {
     return;
   }
 
+  const unexKind = argOf('--unexclude');
+  if (unexKind) {
+    if (!TAGS[unexKind]) { console.error(`EXP_ABORT: --unexclude must be one of ${Object.keys(TAGS).join('|')}`); process.exit(2); }
+    const ids = String(args[args.indexOf('--unexclude') + 2] || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const why = argOf('--why');
+    if (!ids.length) { console.error('EXP_ABORT: pass a comma-separated list of application ids'); process.exit(2); }
+    if (!why) { console.error('EXP_ABORT: --why is required. Reversing an exclusion needs the reason the original one was wrong.'); process.exit(2); }
+    let ok = 0, skip = 0, failed = 0;
+    for (const id of ids) {
+      const r = byApp.get(id);
+      if (!r) { skip++; console.log(`  SKIP ${id} not found`); continue; }
+      const edit = markUnexcluded(r.fit_notes || '', unexKind);
+      if (!edit.ok) { skip++; console.log(`  SKIP ${id} ${edit.why}`); continue; }
+      console.log(`  ${APPLY ? 'BACK ' : 'PLAN '} ${id.padEnd(9)} ${String(r.stage).padEnd(13)} ${String(r.title || '').slice(0, 28)}`);
+      if (!APPLY) continue;
+      const res = await fetch(`https://api.notion.com/v1/pages/${r.id}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ properties: { 'Fit notes': { rich_text: [{ text: { content: edit.text.slice(0, 1900).trim() } }] } } }),
+      });
+      if (res.ok) ok++; else { failed++; console.log(`    FAIL ${res.status}`); }
+    }
+    console.log(`EXP_UNEXCLUDE: ${unexKind} ${ok} restored, ${skip} skipped, ${failed} failed${APPLY ? '' : ' (dry run)'}  reason: ${why}`);
+    return;
+  }
+
+  const excludeKind = argOf('--exclude');
+  if (excludeKind) {
+    if (!TAGS[excludeKind]) { console.error(`EXP_ABORT: --exclude must be one of ${Object.keys(TAGS).join('|')}`); process.exit(2); }
+    const ids = String(args[args.indexOf('--exclude') + 2] || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const why = argOf('--why');
+    if (!ids.length) { console.error('EXP_ABORT: pass a comma-separated list of application ids'); process.exit(2); }
+    if (!why) { console.error('EXP_ABORT: --why is required. An exclusion without a stated reason is indistinguishable from cooking the result.'); process.exit(2); }
+    let ok = 0, skip = 0, failed = 0;
+    for (const id of ids) {
+      const r = byApp.get(id);
+      if (!r) { skip++; console.log(`  SKIP ${id} not found`); continue; }
+      const edit = markExcluded(r.fit_notes || '', excludeKind, today, why);
+      if (!edit.ok) { skip++; console.log(`  SKIP ${id} ${edit.why}`); continue; }
+      console.log(`  ${APPLY ? 'EXCL ' : 'PLAN '} ${id.padEnd(9)} ${String(r.stage).padEnd(13)} ${String(r.title || '').slice(0, 28)}`);
+      if (!APPLY) continue;
+      const res = await fetch(`https://api.notion.com/v1/pages/${r.id}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${process.env.NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ properties: { 'Fit notes': { rich_text: [{ text: { content: edit.text.slice(0, 1900).trim() } }] } } }),
+      });
+      if (res.ok) ok++; else { failed++; console.log(`    FAIL ${res.status}`); }
+    }
+    console.log(`EXP_EXCLUDE: ${excludeKind} ${ok} excluded, ${skip} skipped, ${failed} failed${APPLY ? '' : ' (dry run)'}`);
+    return;
+  }
+
   // --status (default)
   console.log(`funnel experiments as at ${today}\n`);
   for (const kind of Object.keys(TAGS)) {
-    const members = rows.filter((r) => cohortOf(r).includes(kind));
-    console.log(`${kind.toUpperCase()}  n=${members.length}`);
-    if (!members.length) { console.log('  (nobody enrolled yet)\n'); continue; }
+    const tagged = rows.filter((r) => cohortOf(r).includes(kind));
+    const members = tagged.filter((r) => liveCohortOf(r).includes(kind));
+    const dropped = tagged.filter((r) => exclusionOf(r, kind));
+    console.log(`${kind.toUpperCase()}  n=${members.length}${dropped.length ? `  (+${dropped.length} excluded, not counted)` : ''}`);
+    if (!members.length && !dropped.length) { console.log('  (nobody enrolled yet)\n'); continue; }
     const tally = {};
     for (const r of members) { const c = classify(r); tally[c] = (tally[c] || 0) + 1; }
     for (const [k, v] of Object.entries(tally).sort((a, b) => b[1] - a[1])) console.log(`  ${String(v).padStart(3)}  ${k}`);
     for (const r of members) {
       console.log(`      ${r.application_id.padEnd(9)} ${String(r.stage).padEnd(13)} ${classify(r).padEnd(24)} ${String(r.title || '').slice(0, 26)}`);
     }
+    if (dropped.length) {
+      console.log('  EXCLUDED (kept on the row, kept out of the result)');
+      for (const r of dropped) {
+        const e = exclusionOf(r, kind);
+        console.log(`      ${r.application_id.padEnd(9)} ${String(r.stage).padEnd(13)} ${e.excluded}  ${e.reason}`);
+      }
+    }
     console.log('');
   }
   // The comparison that matters. Baseline is every sent row NOT in an experiment.
+  // An excluded row never received the intervention, so it is baseline, not cohort.
   const sent = rows.filter((r) => RESPONDED.test(String(r.stage || '')) || r.apply_date);
-  const base = sent.filter((r) => !cohortOf(r).length);
+  const base = sent.filter((r) => !liveCohortOf(r).length);
   const prog = base.filter((r) => PROGRESSED.test(String(r.stage || ''))).length;
   console.log(`BASELINE (sent, not in any experiment)  n=${base.length}  progressed ${prog} (${(100 * prog / Math.max(1, base.length)).toFixed(1)}%)`);
   console.log('  -> the number either experiment has to beat.');
