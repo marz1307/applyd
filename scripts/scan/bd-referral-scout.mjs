@@ -142,18 +142,40 @@ function selectCompanies() {
     rows = JSON.parse(out);
   } catch (e) { errors.push('notion_query_failed: ' + e.message.slice(0, 80)); return []; }
   const noWarm = /no warm path|no-warm|sponsor[- ]?unknown|cold[- ]?only|no affiliation/i;
+  // Count the WHOLE population before capping. An earlier version incremented
+  // these inside the loop that `break`s at MAX_COMPANIES, so with --limit 2 it
+  // reported "5 with Layer-1 notes, 2 flagged" when the real figures were
+  // dozens of each. A diagnostic that stops counting when the cap is hit
+  // under-reports the backlog — the same shape of silent under-report this
+  // line exists to expose.
+  const withLayer1 = rows.filter((r) => String(r.fit_notes || '').includes('[referral-scout'));
+  const flaggedRows = withLayer1.filter((r) => noWarm.test(String(r.fit_notes || '')));
+
   const seen = new Set();
   const picks = [];
-  for (const r of rows) {
-    const fn = String(r.fit_notes || '');
-    if (!fn.includes('[referral-scout')) continue;       // Layer 1 must have run
-    if (!noWarm.test(fn)) continue;                       // only the no-warm-path ones
-    const co = (r.company || '').trim();
-    if (!co || seen.has(co.toLowerCase())) continue;
+  const layer1 = withLayer1.length, flagged = flaggedRows.length;
+  let unnamed = 0;
+  for (const r of flaggedRows) {
+    // `notion-query.mjs --json` emits the employer as `title`. Earlier code
+    // read `r.company`, which that shape has never carried, so `co` was ALWAYS
+    // empty and every row fell out on the next line. The cold scout therefore
+    // selected 0 companies on every run for weeks — exit 0, valid contract,
+    // COMPANIES_SCOUTED: 0, and no lead ever written. Layer 3 had never once
+    // run. `company` is kept as a fallback for callers that pass the other shape.
+    const co = (r.title || r.company || '').trim();
+    if (!co) { unnamed++; continue; }
+    if (seen.has(co.toLowerCase())) continue;
     seen.add(co.toLowerCase());
     picks.push({ company: co, appPageId: r.id || r.page_id, country: r.country });
     if (picks.length >= MAX_COMPANIES) break;
   }
+  // Selecting nothing FROM a non-empty flagged set is a defect, not a quiet
+  // "nothing to do" — that is precisely how the above hid for weeks. Say so
+  // in the contract, where the watchdog counts ERRORS.
+  if (flagged > 0 && picks.length === 0) {
+    errors.push(`cold_queue_empty_despite_${flagged}_flagged_rows (${unnamed} had no usable employer name)`);
+  }
+  console.log(`SELECTION: ${rows.length} Stage-3 rows, ${layer1} with Layer-1 notes, ${flagged} flagged no-warm-path, ${picks.length} selected`);
   return picks;
 }
 
