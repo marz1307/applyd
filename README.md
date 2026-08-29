@@ -84,7 +84,7 @@ Per-agent setup (MCP wiring, scheduled routines, known caveats): [`docs/AGENT_CO
 
 ### 3. Onboarding
 
-The skill walks you through eight questions:
+The skill walks you through ten questions (three batches: 4 + 4 + 2):
 
 | # | Question | Why |
 |---|---|---|
@@ -96,6 +96,8 @@ The skill walks you through eight questions:
 | 6 | Bright Data API key? | Powers LinkedIn, Indeed, and Glassdoor scraping |
 | 7 | Notion integration token? | Auto-creates your Applications database |
 | 8 | Scheduled scan hour? | 07:00 / 12:30 / 18:00 / custom / off |
+| 9 | Firecrawl backend? | Self-host (Docker) · skip (Playwright + WebFetch) · cloud (API key) |
+| 10 | Email response-tracking layer? | Skip · enable via Gmail MCP (OAuth) · enable via already-configured mail MCP. Read-only, never sends. Auto-files replies as Rejected / Responded on the matching Notion row. |
 
 When it finishes, your workspace has `cv.md`, `config/profile.yml`, `portals.yml`, `modes/_profile.md`, `.env`, and a fresh Notion DB with three dashboard views.
 

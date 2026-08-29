@@ -97,7 +97,7 @@ If the user gives a different path: `mkdir -p <path>`, then use it as WORKSPACE 
 
 Use **AskUserQuestion** to collect the onboarding inputs. The tool caps at 4 questions per call, so split into two consecutive batches:
 
-> "Welcome to applyd. To set up your personal pipeline I need a few things. Nine questions split across three batches (4 + 4 + 1)."
+> "Welcome to applyd. To set up your personal pipeline I need a few things. Ten questions split across three batches (4 + 4 + 2)."
 
 **Batch 1 (questions 1–4):**
 
@@ -148,12 +148,28 @@ After Batch 1, the workspace has identity + direction. Batch 2 fills in roles, s
    - "Custom — I'll specify the hour next"
    - "Don't schedule — I'll run scans manually"
 
-**Batch 3 (question 9):** — runs only after Batch 2 because Firecrawl install can take a few minutes on first run, and the user gets cleaner feedback if it's its own batch.
+**Batch 3 (questions 9–10):** — runs only after Batch 2 because both integrations take a few minutes on first run (Firecrawl install; email OAuth flow) and cleaner feedback lives in its own batch.
 
 9. **Firecrawl (clean Step −1 coherence + scraping)** — `header: "Firecrawl"`. Multi-select: false. Options (free-first):
    - "Self-host (Docker required, no keys) — recommended. Clean Step −1 coherence + full local extraction."
    - "Skip — use Playwright + WebFetch (always works, no Docker)"
    - "Cloud (paste API key) — easiest if Docker isn't available, paid per scrape"
+
+10. **Email response-tracking layer (optional)** — `header: "Email layer"`. Multi-select: false. Options (free-first):
+    - "Skip — I'll check replies manually in my inbox"
+    - "Enable via Gmail MCP — walk me through OAuth setup (Gmail account required)"
+    - "Enable — I already have a Gmail (or IMAP-compatible) mail MCP configured in this agent"
+
+If "Walk me through" on Email:
+
+> "The email layer reads your inbox READ-ONLY and auto-files employer replies as `Rejected` / `Responded` on the matching Notion row. Never sends, never mutates. Setup:
+>
+> 1. In an interactive Claude Code session (or your agent's MCP settings), add a Gmail MCP connector. In Claude Code: run `/mcp` and pick the Gmail connector from the list, OR add it via your claude.ai account's Connectors panel and reconnect. In Codex / Cursor / etc.: add the Gmail MCP server to the CLI's MCP config file per that agent's docs.
+> 2. Complete the OAuth flow in your browser. **Only read + label scopes are needed** — you can decline any send / compose scope the connector requests, and the layer will still work.
+> 3. Restart your agent to pick up the new MCP.
+> 4. Reply 'done' here. I'll write `EMAIL_LAYER=gmail` into your `.env` and verify the connection by running `node scripts/email/probe.mjs --dry-run` (dry-run touches nothing).
+>
+> Gmail compatibility: the layer targets Gmail primarily, but any MCP that exposes label reads on an IMAP-compatible mailbox works — set `EMAIL_LAYER=<your-mcp-name>` instead. See `scripts/email/README.md` for the mailbox contract."
 
 If "Explain first" on Bright Data:
 

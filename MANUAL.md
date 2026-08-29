@@ -8,7 +8,7 @@ A step-by-step walkthrough from "I have nothing installed" to "I just clicked Su
 
 1. [Prerequisites](#1-prerequisites)
 2. [Installation](#2-installation)
-3. [First-run onboarding (the eight questions)](#3-first-run-onboarding)
+3. [First-run onboarding (the ten questions)](#3-first-run-onboarding)
 4. [Daily workflow](#4-daily-workflow)
    - [Morning: review the scheduled scan](#41-morning-review-the-scheduled-scan)
    - [Evaluate a specific posting](#42-evaluate-a-specific-posting)
@@ -113,7 +113,7 @@ If everything is wired up, you'll see the onboarding flow start.
 
 ## 3. First-run onboarding
 
-The skill asks you nine questions in three batches (4 + 4 + 1). You can think about them ahead of time; here's what each one is for and what to have ready.
+The skill asks you ten questions in three batches (4 + 4 + 2). You can think about them ahead of time; here's what each one is for and what to have ready.
 
 ### Batch 1: identity and direction
 
@@ -137,11 +137,12 @@ The skill writes whatever you give it into your workspace as:
 | 7 | **Notion integration token?** | If you don't have one yet, pick "walk me through" and the skill talks you through creating it at https://www.notion.com/profile/integrations. Then paste the token (starts with `ntn_`). Also paste the URL of the Notion page where you want the tracker DB to live. |
 | 8 | **Scheduled scan hour?** | When do you want the recurring scan to fire? Presets: 07:00 (catch overnight postings), 12:30 (lunchtime), 18:00 (end-of-day), Custom, or Off. Pick whichever fits your local rhythm. |
 
-### Batch 3: Firecrawl (optional, clean Step −1)
+### Batch 3: Firecrawl + email layer (both optional)
 
 | # | Question | What to have ready |
 |---|---|---|
 | 9 | **Firecrawl for clean scraping?** | **Default is self-host** (Docker required, no keys, fully local). Alternatives: skip (Playwright + WebFetch fallback, always works) or cloud (paste a `FIRECRAWL_API_KEY`, paid per scrape). The skill detects Docker — if it's missing, it offers cloud / skip automatically. |
+| 10 | **Email response-tracking layer?** | **Default is skip** (you check replies manually). Enable it and applyd will read your Gmail inbox READ-ONLY and auto-file employer replies as `Rejected` / `Responded` on the matching Notion row. Requires a Gmail MCP connector in your agent (Claude Code: `/mcp` → add Gmail; other agents: their own MCP config). Only read + label OAuth scopes needed — decline any send scopes. Sets `EMAIL_LAYER=gmail` in `.env`. Never sends anything. Gmail-compatible IMAP mailboxes work too via a compatible MCP — set `EMAIL_LAYER=<mcp-name>` yourself. |
 
 At the end of Batch 2, the skill:
 
