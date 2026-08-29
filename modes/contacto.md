@@ -6,6 +6,99 @@ Generate targeted outreach messages to recruiters, hiring managers, and peers at
 
 ## Workflow
 
+### Step 0b — NAMING a real person (the one method that reliably works)
+
+**Read this before reaching for any cold scout.** Every automated path this repo
+ships has produced named humans only intermittently: `referral-scout` (Layer 1)
+writes a ranked warm angle and a *search URL* and names nobody, and
+`bd-referral-scout.mjs` (Layer 3) returns Google-SERP hits with names
+reverse-engineered from URL slugs and **no connection degree at all** because
+it never logs in. Treat their output as leads to CHECK, never leads to write to.
+
+The one method that scales is a Claude session driving a browser MCP against
+the operator's own logged-in LinkedIn.
+
+**The procedure, in order.**
+
+**LinkedIn is the ONLY source for people, whatever portal the JD came from.**
+A row found on Indeed, Xing, Stepstone, eFinancialCareers or WTTJ is still
+scouted on LinkedIn. Xing exposes no connection degree and no mutuals — the two
+fields that make a contact worth having and that nothing else can supply — and
+the rest have no people graph at all. The JD's portal decides only where the
+employer gets verified, never where the people come from.
+
+1. **Quoted people-search first.** It needs no company slug, and the quotes
+   stop LinkedIn matching the words separately:
+   ```
+   linkedin.com/search/results/people/?keywords="Company Name" analytics engineer&spellCorrectionEnabled=false
+   ```
+   `spellCorrectionEnabled=false` is load-bearing: without it LinkedIn silently
+   autocorrects near-neighbour company names and returns unrelated profiles.
+2. **Read the results with a page-text tool.** On a people-SEARCH results page
+   it returns everything needed: name, degree, headline, location, and the
+   "X is a mutual connection" line. This is the simplest reader — start here.
+
+   **When you need profile URLs too**, a page-scripting tool works, but it is
+   refused if the script RETURNS cookie or query-string data. Returning
+   `location.href` on a search page trips it, because the URL carries the
+   query. Reading hrefs and DOM text does not. Sketch:
+
+   ```js
+   [...new Set([...document.querySelectorAll('a[href*="/in/"]')].map(a => a.href.split('?')[0]))]
+     .map(u => {
+       let n = document.querySelector(`a[href^="${u}"]`);
+       while (n && n.innerText.trim().length < 20 && n.parentElement) n = n.parentElement;
+       return u.split('/in/')[1].replace(/\/$/,'') + ' :: ' +
+         (n ? n.innerText.trim().split('\n').filter(Boolean).slice(0,3).join(' | ') : '');
+     })
+     .filter(s => /EMPLOYER NAME/i.test(s))
+     .join('\n')
+   ```
+
+   The `.filter` is the useful part: it keeps only rows whose headline names
+   the employer, so what comes back is already confirmed. It returns
+   `slug :: Name | degree | headline`. **Caveat:** mutual-connection links are
+   anchored on the same page, so a few rows come back reading "X & Y are
+   mutual connections" instead of a headline. Those are the mutuals, not
+   results — discard them.
+3. **Company People tab** (`/company/{slug}/people/?keywords=data`) — use when
+   the name is also a common word, or to widen beyond the first search page.
+   - Slugs fail often. Find the slug via a **company** search
+     (`/search/results/companies/?keywords=…`) and read the href.
+   - **A plain page-text read returns only the header here**, no profile rows.
+     Use the scripting snippet above instead. On this tab it returns names and
+     degrees but NOT headlines, so it tells you who to look at, not who they
+     work for. Confirm the employer from the search results or by opening the
+     profile.
+   - It also picks up page FOLLOWERS ("X follows this page"), who are not
+     employees. Discard them.
+4. **If the tab shows no directory at all** — only a "People you may know"
+   panel — go to step 6. That happens on smaller company pages.
+5. **When both fail, identify the employer from the ATS** on the job URL
+   first, then search the real legal name.
+6. **Best expansion path: open ONE confirmed employee's profile.** Its "More
+   profiles for you" sidebar lists similar people, and their headlines usually
+   name the employer. In practice this produces the largest yield after both
+   the search and the People tab have run dry.
+7. **Confirm the employer from the person's own headline or profile.** Do NOT
+   trust the "People you may know" panel — it mixes in non-employees. A name
+   that appears ONLY in that panel is unconfirmed until you open the profile
+   and read the employer block.
+8. **Record the degree and the mutual by name** ("2nd, via {mutual name}").
+   Degree is only visible logged-in, and it is the single most valuable field
+   here — it is what any headless scout can never supply.
+
+**Verify the employer before writing a single message.** Tracker `Company`
+fields are our tag, not the employer's legal name. A row tagged with a
+holding-company name can be matched to the wrong operating entity — different
+industry, different city — and every contact drafted against it becomes an
+embarrassing message about the wrong job. The row's Location field is the
+cheapest tell; the posting body is the proof.
+
+**This cannot run headless.** It needs a logged-in browser, so it is a
+prompt/interactive task and must never be scheduled under a strict-MCP-config
+headless CLI, which cannot see the browser connector.
+
 ### Step 1 — Identify the target
 
 Via web search + LinkedIn browsing:

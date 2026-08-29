@@ -64,6 +64,7 @@ For the full user-vs-system file boundary, see `DATA_CONTRACT.md`.
 | `scripts/tracker/merge-tracker.mjs` · `scripts/tracker/dedup-tracker.mjs` · `scripts/tracker/normalize-statuses.mjs` · `scripts/tracker/verify-pipeline.mjs` | Tracker maintenance scripts. |
 | `scripts/metrics/analyze-patterns.mjs` | Pattern analysis on rejection / response data (JSON output). |
 | `scripts/metrics/followup-cadence.mjs` | Follow-up cadence calculator (JSON output). |
+| `scripts/outreach.mjs` | The only writer that can move `Outreach status` past `Not contacted`. Enforces the six-state lifecycle in `modes/contacto.md`, refuses ambiguous names rather than guessing, stamps the send date. `--report` / `--due` / `--list` / `--mark` / `--retire-dead` / `--self-test`. Dry by default; `--apply` writes. Only ever mark a send that actually happened — the field is the one honest record of what left the building. |
 | `scripts/cv/cv-sync-check.mjs` | Sanity check: `cv.md` alignment with `profile.yml`. |
 | `scripts/doctor.mjs` | Repo health check. |
 
@@ -77,6 +78,8 @@ Modes live as plain Markdown files under `modes/`. How you *invoke* one depends 
 | Asks to evaluate offer | `oferta` |
 | Asks to compare offers | `ofertas` |
 | Wants LinkedIn outreach | `contacto` |
+| Wants a named contact found and outreach drafted for a Stage-3 row | `referral` |
+| Wants to chase a Stage-4+ application that has gone silent | `chase` |
 | Asks for company research | `deep` |
 | Preps for interview at specific company | `interview-prep` |
 | Wants to generate CV/PDF | `pdf` |
