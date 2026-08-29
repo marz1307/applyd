@@ -604,9 +604,11 @@ export function normaliseCompany(name) {
   if (!name) return "";
   let s = String(name).replace(EMOJI_RE, "").trim();
   // Decode common HTML entities BEFORE the strip so "Cushman &amp; Wakefield"
-  // and "Cushman & Wakefield" normalise to the same slug.
-  s = s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-       .replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"');
+  // and "Cushman & Wakefield" normalise to the same slug. Decode "&amp;" LAST
+  // so an "&amp;lt;" payload cannot double-decode to "<" (js/double-escaping).
+  s = s.replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+       .replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"')
+       .replace(/&amp;/g, "&");
   s = s.replace(LEGAL_FORM_RE, "").trim();
   s = s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return s;
@@ -617,8 +619,11 @@ export function normaliseRoleTitle(role) {
   let s = String(role).replace(EMOJI_RE, "").trim();
   s = s.replace(GENDER_MARKER_RE, "").trim();
   // Strip HTML entities that leak from scraped titles (&amp; &#039; &quot;).
-  s = s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-       .replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"');
+  // Decode "&amp;" LAST so an "&amp;lt;" payload cannot double-decode to "<"
+  // (js/double-escaping).
+  s = s.replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+       .replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"')
+       .replace(/&amp;/g, "&");
   // Collapse whitespace, lowercase, strip trailing punctuation.
   s = s.toLowerCase().replace(/\s+/g, " ").replace(/[.,;:]+$/g, "").trim();
   // Normalise common separators to spaces so "data-engineer" and "data engineer" match.
