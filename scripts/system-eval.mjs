@@ -30,7 +30,8 @@ import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { execSync, execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { pickLatestLog } from './routine-logs-core.mjs';
+import { pickLatestLog, nullDevice, redactSecrets } from './routine-logs-core.mjs';
+import { summarise as outreachSummarise, dueContacts } from './outreach.mjs';
 
 const ROOT = resolve(import.meta.dirname || '.', '..');
 const ARGS = new Set(process.argv.slice(2));
@@ -336,6 +337,28 @@ function notionState() {
   return { counts, total, stage2_needing_draft: stage2NeedsDraft };
 }
 
+// ----- 2b. Outreach ---------------------------------------------------------
+// Contacts are worthless as a count. What matters is whether any note has ever
+// gone out, because until one does there is no reply rate to read and no way
+// to tell whether the drafting work was worth doing. Semantics come from
+// outreach.mjs; never recompute them here.
+function outreachHealth(todayISO) {
+  try {
+    const out = execSync('node scripts/outreach.mjs --list --json', {
+      // Timeout headroom for the full applications read; a false "unreadable"
+      // yellow is noise that trains you to ignore the line.
+      cwd: ROOT, encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024,
+    });
+    const contacts = JSON.parse(out);
+    const s = outreachSummarise(contacts);
+    const due = dueContacts(contacts, todayISO);
+    const orphans = contacts.filter((c) => c.owner === 'orphan-dead-application').length;
+    return { contacts: s.contacts, sent: s.sent, answered: s.answered, referrals: s.referrals, due: due.length, orphans };
+  } catch (e) {
+    return { error: String(e.message || e).slice(0, 140) };
+  }
+}
+
 // ----- 3. Output artifacts -------------------------------------------------
 function artifactCounts() {
   const dirs = {
@@ -391,6 +414,7 @@ function configCheck() {
     'scripts/notion/notion-query.mjs',
     'scripts/notion/notion-upload-file.mjs',
     'scripts/scan/cross-portal-dedup.mjs',
+    'scripts/outreach.mjs',
   ];
   out.key_files_missing = keyFiles.filter((f) => !existsSync(join(ROOT, f)));
   return out;
@@ -402,22 +426,22 @@ function reachability() {
   const out = {};
   // Notion
   try {
-    const r = execFileSync('curl', ['-sS', '-o', '/dev/null', '-w', '%{http_code}',
+    const r = execFileSync('curl', ['-sS', '-o', nullDevice(), '-w', '%{http_code}',
       '-H', `Authorization: Bearer ${process.env.NOTION_TOKEN || ''}`,
       '-H', 'Notion-Version: 2022-06-28', 'https://api.notion.com/v1/users/me'],
       { encoding: 'utf8', timeout: 8000 }
     );
     out.notion = { http: r.trim(), ok: r.trim() === '200' };
-  } catch (e) { out.notion = { error: String(e.message).slice(0, 80) }; }
+  } catch (e) { out.notion = { error: redactSecrets(e.message).slice(0, 120) }; }
   // Bright Data — cheap reachability ping (does not consume credits)
   try {
-    const r = execFileSync('curl', ['-sS', '-o', '/dev/null', '-w', '%{http_code}',
+    const r = execFileSync('curl', ['-sS', '-o', nullDevice(), '-w', '%{http_code}',
       '-H', `Authorization: Bearer ${process.env.BRIGHTDATA_DATASET_TOKEN || ''}`,
       'https://api.brightdata.com/datasets/v3/list'],
       { encoding: 'utf8', timeout: 8000 }
     );
     out.brightdata = { http: r.trim(), ok: r.trim() === '200' };
-  } catch (e) { out.brightdata = { error: String(e.message).slice(0, 80) }; }
+  } catch (e) { out.brightdata = { error: redactSecrets(e.message).slice(0, 120) }; }
   return out;
 }
 
@@ -575,6 +599,7 @@ const report = {
   auth_cascade: detectAuthCascade(),
   alerts_7d: recentAlerts(),
   notion: notionState(),
+  outreach: QUICK ? { skipped: 'quick mode' } : outreachHealth(todayISO.slice(0, 10)),
   artifacts: artifactCounts(),
   config: configCheck(),
   reachability: reachability(),
@@ -620,6 +645,22 @@ for (const [name, r] of Object.entries(report.routines)) {
     red.push(`routine "${name}" drain log has no APPLY_DATE_RESCUE line (${r.apply_date_rescue.log}) — the apply-date guard did not report; Apply dates are being lost again`);
   } else if (r.apply_date_rescue_failed > 0) {
     red.push(`routine "${name}" apply-date rescue failed to write ${r.apply_date_rescue_failed} row(s) — those flip dates are unrecoverable once the ledger prunes them`);
+  }
+}
+// Outreach. NOT an error while it is zero — it is zero because nothing has been
+// sent yet, and the fix is a human sending a message, not a code change. But an
+// orphaned contact or an overdue follow-up IS drift the system caused itself.
+if (report.outreach?.error) {
+  yellow.push(`outreach health unreadable: ${report.outreach.error}`);
+} else if (report.outreach && !report.outreach.skipped) {
+  if (report.outreach.orphans > 0) {
+    yellow.push(`${report.outreach.orphans} contact(s) hang off a dead application — owned by no skill; run \`node scripts/outreach.mjs --retire-dead\``);
+  }
+  if (report.outreach.due > 0) {
+    yellow.push(`${report.outreach.due} sent note(s) past the 7-weekday follow-up window — run \`node scripts/outreach.mjs --due\``);
+  }
+  if (report.outreach.sent === 0 && report.outreach.contacts > 0) {
+    yellow.push(`${report.outreach.contacts} contacts on file and 0 notes ever logged as sent — outreach is entirely unmeasured`);
   }
 }
 if (report.config.key_files_missing.length) red.push(`missing key files: ${report.config.key_files_missing.join(', ')}`);
@@ -711,6 +752,10 @@ console.log(`ROUTINES_CRITICAL: ${red.length}`);
 console.log(`NOTION_TOTAL_ROWS: ${report.notion.total ?? 'n/a'}`);
 console.log(`STAGE_1_BACKLOG: ${report.notion.counts?.['1. Discovered'] ?? 'n/a'}`);
 console.log(`STAGE_2_NEEDING_DRAFT: ${report.notion.stage2_needing_draft ?? 'n/a'}`);
+console.log(`OUTREACH_CONTACTS: ${report.outreach?.contacts ?? 'n/a'}`);
+console.log(`OUTREACH_SENT: ${report.outreach?.sent ?? 'n/a'}`);
+console.log(`OUTREACH_ANSWERED: ${report.outreach?.answered ?? 'n/a'}`);
+console.log(`OUTREACH_DUE_FOLLOWUP: ${report.outreach?.due ?? 'n/a'}`);
 console.log(`KEY_FILES_MISSING: ${report.config.key_files_missing.length}`);
 console.log(`NOTION_API_OK: ${report.reachability.notion?.ok ?? 'n/a'}`);
 console.log(`BD_API_OK: ${report.reachability.brightdata?.ok ?? 'n/a'}`);

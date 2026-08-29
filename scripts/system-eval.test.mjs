@@ -17,7 +17,7 @@
  * Same lesson as picking cover-letter files by the date IN the filename
  * rather than by sort order. A filename is not a chronology.
  */
-import { pickLatestLog } from './routine-logs-core.mjs';
+import { pickLatestLog, nullDevice, redactSecrets } from './routine-logs-core.mjs';
 
 let pass = 0, fail = 0;
 const check = (name, got, want) => {
@@ -86,6 +86,30 @@ check('an empty list yields null', pickLatestLog([], clock([]), 'auto-draft-'), 
 check('only sidecars yields null',
   pickLatestLog(['auto-draft-x.log.err', 'auto-draft-y.heartbeat.log'], clock([]), 'auto-draft-'), null);
 check('a single log is returned', pickLatestLog(['auto-draft-a.log'], clock([]), 'auto-draft-'), 'auto-draft-a.log');
+
+// --- nullDevice + redactSecrets (added 2026-08-29) --------------------------
+{
+  const eq = (label, got, want) => {
+    if (JSON.stringify(got) === JSON.stringify(want)) { pass++; }
+    else { fail++; console.log(`  FAIL ${label}\n    got  ${JSON.stringify(got)}\n    want ${JSON.stringify(want)}`); }
+  };
+
+  eq('windows gets NUL', nullDevice('win32'), 'NUL');
+  eq('linux gets /dev/null', nullDevice('linux'), '/dev/null');
+  eq('darwin gets /dev/null', nullDevice('darwin'), '/dev/null');
+
+  eq('a bearer token is redacted',
+    redactSecrets('curl -H "Authorization: Bearer ntn_abc123XYZ" https://api.notion.com'),
+    'curl -H "Authorization: Bearer [REDACTED]" https://api.notion.com');
+  eq('a bare notion token is redacted', redactSecrets('token=ntn_abc123'), 'token=ntn_[REDACTED]');
+  eq('a bright data token is redacted', redactSecrets('brd_9f8e7d'), 'brd_[REDACTED]');
+  eq('the surrounding message survives', redactSecrets('Command failed: curl -sS'), 'Command failed: curl -sS');
+  eq('empty input is safe', redactSecrets(null), '');
+  // The real failure string this was written for.
+  eq('the actual watchdog error is scrubbed',
+    redactSecrets('Command failed: curl -H "Authorization: Bearer ntn_examplevRdEm" x').includes('ntn_examplevRdEm'),
+    false);
+}
 
 if (fail) { console.error(`\nsystem-eval log selection: ${fail} failure(s)`); process.exit(1); }
 console.log(`system-eval log selection: ${pass} passed, 0 failed`);

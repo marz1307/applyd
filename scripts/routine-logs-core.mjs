@@ -43,3 +43,30 @@ export function pickLatestLog(files, mtimeOf, prefix) {
   if (!candidates.length) return null;
   return candidates.reduce((best, f) => ((mtimeOf(f) || 0) > (mtimeOf(best) || 0) ? f : best));
 }
+
+/**
+ * The platform's bit bucket.
+ *
+ * `curl -o /dev/null` does not work under Windows curl: it tries to create a
+ * file literally called `/dev/null`, fails on write, and exits 23. On a Windows
+ * host that turned BOTH reachability probes permanently 🔴 in a watchdog that
+ * runs twice a day — while the underlying APIs were fine and being written to
+ * all session. A monitor that is always red teaches you to stop reading it,
+ * which is worse than having no monitor.
+ */
+export const nullDevice = (platform = process.platform) => (platform === 'win32' ? 'NUL' : '/dev/null');
+
+/**
+ * Strip credentials out of anything on its way to a log file.
+ *
+ * A failed `execSync` puts the ENTIRE command in the error message, and these
+ * commands carry `Authorization: Bearer <token>`. Nothing has to leak — the
+ * caller may truncate to 80 chars, which happens to cut mid-token — but that
+ * is an accident, not a safeguard, and one edit to the slice would ship the
+ * token straight into `data/routine-logs/` twice daily. Make it deliberate.
+ */
+export function redactSecrets(s) {
+  return String(s ?? '')
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(/\b(ntn_|secret_|brd_|sk-)[A-Za-z0-9._~+/=-]+/g, '$1[REDACTED]');
+}
