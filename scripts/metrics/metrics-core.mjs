@@ -62,6 +62,47 @@ export const hasResponded = (r) => hasProgressed(r) || isRejected(r) || !!r.resp
 export const isGhosted = (r) => isApplied(r) && !hasResponded(r);
 
 /**
+ * Was this application backed by a referral?
+ *
+ * The `Referral?` property has existed since the tracker was built and had never
+ * been read or written, so the single comparison the whole referral effort is
+ * FOR — referred vs cold — could not be made from this data. It is written by
+ * `scripts/outreach.mjs` when a contact reaches `Referral confirmed`, which is
+ * the only moment it is true rather than hoped for.
+ *
+ * Deliberately strict: anything that is not the exact `Referred!` option counts
+ * as cold. A blank means "no referral", never "unknown" — treating blanks as
+ * unknown would quietly shrink the cold baseline and flatter the referral rate.
+ */
+export const isReferred = (r) => String(r?.referral || "").trim() === "Referred!";
+
+/**
+ * Referred vs cold, on whatever outcome matters.
+ *
+ * Returns null counts rather than 0% when a side is empty. With zero referrals
+ * on record, "0%" would read as "referrals do not work" when it means "nothing
+ * has been tried" — the same distinction `summarise()` protects in outreach.mjs.
+ */
+export function referralComparison(rows, { minCohort = 1 } = {}) {
+  const applied = (rows || []).filter(isApplied);
+  const referred = applied.filter(isReferred);
+  const cold = applied.filter((r) => !isReferred(r));
+  const side = (xs) => {
+    if (xs.length < minCohort) return { n: xs.length, responded: null, progressed: null, response_pct: null, progressed_pct: null };
+    const resp = xs.filter(hasResponded).length;
+    const prog = xs.filter(hasProgressed).length;
+    return {
+      n: xs.length,
+      responded: resp,
+      progressed: prog,
+      response_pct: rate(resp, xs.length),
+      progressed_pct: rate(prog, xs.length),
+    };
+  };
+  return { referred: side(referred), cold: side(cold), any_referrals: referred.length > 0 };
+}
+
+/**
  * Canonical outcome buckets for a Notion row:
  *   pre_apply  — never reached Stage 4 (not part of the applied cohort)
  *   progressed — reached Stage 5+ (assessment or human conversation)

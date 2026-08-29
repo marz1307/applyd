@@ -135,6 +135,11 @@ function extractEssentials(page) {
     fit_notes: get("Fit notes", "rich_text"),
     jd_snapshot: get("JD snapshot", "rich_text"),
     discovered_date: get("Discovered date", "date"),
+    // Exposed as an essential 2026-08-29. The property existed from the start
+    // and had never been read OR written, so "referred vs cold" — the one
+    // comparison the whole referral effort exists to make — was not answerable
+    // from this data. Downstream: metrics-core.isReferred / referralComparison.
+    referral: get("Referral?", "select"),
     recruiter_sim_verdict: get("Recruiter-sim verdict", "select"),
   };
 }

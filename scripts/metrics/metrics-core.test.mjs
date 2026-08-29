@@ -15,6 +15,7 @@ import yaml from "js-yaml";
 import {
   APPLIED_STAGES, PROGRESSED_STAGES, CANONICAL_STATUSES, STATUS_ALIASES,
   isApplied, hasProgressed, isRejected, hasResponded, isGhosted,
+  isReferred, referralComparison,
   classifyNotionOutcome, normalizeStatus, classifyLocalOutcome,
   rate, avg, funnelHeadline, sliceBy, scoreCalibration, windowAdherence,
   stageEdgeCalibration, parseBlockScores, dimensionCalibration,
@@ -252,6 +253,42 @@ check("advert: unparseable URL yields nothing", aid("not a url"), "");
 check("advert: empty input yields nothing", aid(""), "");
 check("advert: slug-only board yields nothing",
   aid("https://www.brightnetwork.co.uk/graduate-jobs/friend-mts/junior-data-scientist-birmingham-2026-ai6p"), "");
+
+// --- referral semantics (added 2026-08-29) ---------------------------------
+check("the exact option counts as referred", isReferred({ referral: "Referred!" }), true);
+check("whitespace around the option is tolerated", isReferred({ referral: " Referred! " }), true);
+// A blank is "no referral", NOT "unknown". Treating it as unknown would shrink
+// the cold baseline and flatter the referral rate against it.
+check("blank is cold, not unknown", isReferred({ referral: "" }), false);
+check("the No option is cold", isReferred({ referral: "No" }), false);
+check("a missing property is cold", isReferred({}), false);
+check("a null row is cold", isReferred(null), false);
+check("near-misses do not count", isReferred({ referral: "Referred" }), false);
+
+{
+  const rows = [
+    { stage: "9. Offer",   apply_date: "2026-08-01", referral: "Referred!" },
+    { stage: "4. Applied", apply_date: "2026-08-02", referral: "Referred!" },
+    { stage: "Rejected",   apply_date: "2026-08-03", referral: "No" },
+    { stage: "4. Applied", apply_date: "2026-08-04" },
+    { stage: "3. Drafted" },                                  // unsent: excluded
+  ];
+  const c = referralComparison(rows);
+  check("referred cohort counted", c.referred.n, 2);
+  check("cold cohort counted", c.cold.n, 2);
+  check("unsent rows are excluded from both", c.referred.n + c.cold.n, 4);
+  check("referred progression counted", c.referred.progressed, 1);
+  check("a rejection is a response, not a progression", c.cold.responded, 1);
+  check("cold progression counted", c.cold.progressed, 0);
+  check("referrals present is flagged", c.any_referrals, true);
+}
+{
+  // The state the system may sit in for a while: no referral confirmed yet.
+  const c = referralComparison([{ stage: "4. Applied", apply_date: "2026-08-01" }]);
+  check("no referrals means no rate, not 0%", c.referred.response_pct, null);
+  check("and it says so explicitly", c.any_referrals, false);
+  check("the cold side still reports", c.cold.n, 1);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
