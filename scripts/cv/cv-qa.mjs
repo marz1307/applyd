@@ -342,7 +342,7 @@ function getLeadProofPoint(classification) {
   if (cls.includes('BI'))
     return 'Lead with stakeholder impact: 7-day reporting cycle cut to live, 12+ shipped models, Power BI replacing manual spreadsheets, 95% compute cut meaning marts that never lie. One number + one consequence.';
   if (cls.includes('DA'))
-    return 'Lead with outcome metrics: lead response -30%, conversion +15%, data errors -40%, or FMBN dataset accuracy +40% in 6 months. One number + one consequence.';
+    return 'Lead with outcome metrics: lead response -30%, conversion +15%, data errors -40%, or dataset accuracy +40% in 6 months. One number + one consequence.';
   return 'Lead with the single most quantified proof point from the candidate profile that maps directly to the JD\'s primary requirement.';
 }
 

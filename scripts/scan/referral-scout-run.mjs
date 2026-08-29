@@ -102,10 +102,11 @@ function coldFallback(company) {
   return ENTERPRISE.test(company) ? "recruiter" : "hiring-manager";
 }
 // warm_path determination (referral-scout.md §2e): conservative — a genuine, plausible
-// affiliation overlap, NOT a generic keyword URL. Deterministic signals: MLSA/Microsoft-
-// adjacent, modern-data-stack community, or UK (Salford alumni footprint). Staffing and
-// everything else → none → the weekly Layer-3 cold scout (bd-referral-scout) picks it up
-// via the `no-warm-path` token in Fit notes.
+// affiliation overlap, NOT a generic keyword URL. Deterministic signals: community-
+// adjacent (MS/MLSA-style), modern-data-stack community, or the operator's own
+// alumni-footprint region (default: UK). Staffing and everything else → none →
+// the weekly Layer-3 cold scout (bd-referral-scout) picks it up via the
+// `no-warm-path` token in Fit notes.
 function hasWarmPath(company, country, isStaffing) {
   if (isStaffing) return false;
   return MS_ADJ.test(company) || MODERN_STACK.test(company) || country === "UK";

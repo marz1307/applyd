@@ -426,8 +426,17 @@ const CFG = loadConfig();
 // Bulk-scrape query catalog. Renamed from `apify:` → `bulk_scrape:` (2026-07-01);
 // old key accepted as fallback.
 const BULK = CFG.bulk_scrape || CFG.apify || {};
+// DATABASE_ID resolves from config; process.env fallback lets scheduled runs
+// point at their own DB without touching config/profile.yml. No hardcoded
+// fallback — running without a configured DB is an operator error, not a
+// silent write into someone else's tracker.
 const DATABASE_ID = (CFG.notion && CFG.notion.applications_database_id)
-  || "eace68a2-e454-4a6d-ab9d-ed5dfcd65c72";
+  || process.env.NOTION_APPLICATIONS_DATABASE_ID
+  || process.env.NOTION_DATABASE_ID;
+if (!DATABASE_ID && !process.argv.includes('--self-test') && !process.argv.includes('--probe-xportal')) {
+  console.error('bd-bulk-scan: notion.applications_database_id not configured. Set it in config/profile.yml or NOTION_APPLICATIONS_DATABASE_ID env.');
+  process.exit(2);
+}
 
 // Bright Data SERP zone (Web Unlocker) for Google-SERP discovery. The generic
 // dataset scraper pointed at google.com/search gets served Google's consent/chrome

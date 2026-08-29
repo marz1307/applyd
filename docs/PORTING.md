@@ -147,7 +147,7 @@ Applyd is agent-neutral (see [`AGENT_COMPAT.md`](AGENT_COMPAT.md)) and this cons
 - **No mode file may name Claude Code as the runtime.** They say "the agent" or "the headless CLI". Where a Claude-specific tool has no other-agent equivalent (Playwright MCP, the Notion MCP, Chrome extension), name the tool in parentheses as *one* example, then describe the capability in the neutral form so another agent's equivalent is obvious.
 - **`routines/run-routine.ps1` dispatches through `routines/adapters/<agent>.ps1`.** A port that hardcodes `claude -p …` in a routine is a regression — go through the adapter.
 - **`.mcp.json` at the project root is the Claude-Code shape.** Every other agent has its own MCP-config path, listed in `AGENT_COMPAT.md`. When you add an MCP dependency, update all three: the `.mcp.json`, the per-agent config example, and the mode file's Prerequisites section.
-- **Slash commands are prefixed `/applyd`, not `/career-ops` or `/marvis-…`.** The upstream re-brand happened in v2.1; a personal fork may still use the older name locally, but the port strips it back to `/applyd`.
+- **Slash commands are prefixed `/applyd`, not `/career-ops` or `/<fork-name>-…`.** The upstream re-brand happened in v2.1; a personal fork may still use the older name locally, but the port strips it back to `/applyd`.
 
 ---
 
