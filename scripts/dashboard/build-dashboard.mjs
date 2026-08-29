@@ -26,7 +26,7 @@
 import { readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import yaml from "js-yaml";
-import { funnelHeadline, scoreCalibration } from "../metrics/metrics-core.mjs";
+import { funnelHeadline, scoreCalibration, referralComparison, isReferred } from "../metrics/metrics-core.mjs";
 
 const args = process.argv.slice(2);
 const OPEN_AFTER = args.includes("--open");
@@ -100,6 +100,7 @@ function extractEssentials(page) {
     apply_date: get("Apply date", "date"),
     response_date: get("Response date", "date"),
     recruiter_sim_verdict: get("Recruiter-sim verdict", "select"),
+    referral: get("Referral?", "select"),
     resume_files: get("Resume", "files"),
     cover_letter_files: get("Cover Letter", "files"),
     cv_variant: get("CV variant", "select"),
@@ -148,6 +149,14 @@ function summarise(rows) {
     last7[k] = byDay[k] || 0;
   }
 
+  // Referral analytics. The comparison this whole effort exists to make, and
+  // it could not be computed before 2026-08-29 because `Referral?` was never
+  // read or written. `outreach` counts come from the Referral & Outreach DB
+  // via scripts/outreach.mjs; they are the pipeline BEFORE a referral is
+  // confirmed, so a dashboard showing only confirmed referrals would read as
+  // "nothing happening" while dozens of contacts sit waiting to be contacted.
+  const referral = referralComparison(rows);
+
   return {
     total_rows: rows.length,
     by_stage: byStage,
@@ -155,6 +164,10 @@ function summarise(rows) {
     by_country: byCountry,
     by_day_last_7: last7,
     recruiter_sim_distribution: recruiterSim,
+    referral,
+    referred_rows: rows.filter(isReferred).map(r => ({
+      application_id: r.application_id, title: r.title, stage: r.stage, match_score: r.match_score,
+    })),
     top_drafted: drafted,
     top_triaged_pending: triaged,
     // Outcome metrics from the shared semantic layer (metrics-core.mjs) — the
@@ -194,6 +207,40 @@ function readScanFailures() {
   } catch { return { available: false, stale: [] }; }
 }
 
+/**
+ * Outreach funnel from the Referral & Outreach DB, via scripts/outreach.mjs so
+ * the status semantics have exactly one definition. Returns null (never zeros)
+ * when the read fails — a dashboard that shows 0 sends because a script errored
+ * is indistinguishable from one showing 0 sends because nothing was sent, and
+ * only one of those is true.
+ */
+function readOutreach() {
+  const r = spawnSync("node", ["scripts/outreach.mjs", "--list", "--json"], {
+    encoding: "utf8", timeout: 120000, maxBuffer: 32 * 1024 * 1024,
+  });
+  if (r.status !== 0 || !r.stdout) return null;
+  try {
+    const contacts = JSON.parse(r.stdout);
+    const by = {};
+    for (const c of contacts) by[c.status || "(blank)"] = (by[c.status || "(blank)"] || 0) + 1;
+    const owners = {};
+    for (const c of contacts) owners[c.owner || "unknown"] = (owners[c.owner || "unknown"] || 0) + 1;
+    const sent = contacts.filter(c => c.status && c.status !== "Not contacted").length;
+    const answered = contacts.filter(c => ["Replied", "Referral confirmed", "Declined"].includes(c.status)).length;
+    const confirmed = contacts.filter(c => c.status === "Referral confirmed").length;
+    return {
+      contacts: contacts.length,
+      by_status: by,
+      by_owner: owners,
+      sent,
+      answered,
+      confirmed,
+      answer_rate_pct: sent ? Math.round((answered / sent) * 1000) / 10 : null,
+      confirm_rate_pct: sent ? Math.round((confirmed / sent) * 1000) / 10 : null,
+    };
+  } catch { return null; }
+}
+
 function readPaceSummary() {
   // Run pace-alarm --json and parse the contract block; cheap (no LLM, no network).
   const r = spawnSync("node", ["scripts/metrics/pace-alarm.mjs", "--json"], { encoding: "utf8" });
@@ -226,11 +273,13 @@ async function main() {
   const trace = readWrapperTrace();
   const failures = readScanFailures();
   const pace = readPaceSummary();
+  const outreach = readOutreach();
 
   const snapshot = {
     generated_at: new Date().toISOString(),
     database_id: DATABASE_ID,
     summary,
+    outreach,
     wrapper_trace: trace,
     stale_portals: failures,
     pace_summary: pace,
@@ -335,6 +384,9 @@ function buildHtml(s) {
 <h2>Pipeline by stage</h2>
 <div class="card" id="stages"></div>
 
+<h2>Referrals</h2>
+<div class="card" id="referral"></div>
+
 <h2>Source-portal mix</h2>
 <div class="card" id="portals"></div>
 
@@ -421,6 +473,79 @@ function buildHtml(s) {
   ].map(k => '<div class="card"' + (k.title ? ' title="' + String(k.title).replace(/"/g, "&quot;") + '"' : '') +
     '><div class="kpi"' + (k.small ? ' style="font-size:18px;line-height:1.6"' : '') + '>' + k.value +
     '<span class="label">' + k.label + '</span></div></div>').join("");
+
+  // ---- Referrals ---------------------------------------------------------
+  // Two things, deliberately together: the OUTREACH funnel (contacts -> notes
+  // sent -> answered -> confirmed) and the OUTCOME comparison (referred vs
+  // cold applications). Showing only the outcome would read as "referrals do
+  // nothing" while the real story is that no note has gone out yet.
+  (function renderReferral() {
+    const o = s.outreach;
+    const rc = (s.summary || {}).referral;
+    let html = "";
+
+    if (!o) {
+      html += '<div style="color:var(--muted)">Outreach data unavailable — <code>scripts/outreach.mjs --list</code> did not return. This is a read failure, not zero outreach.</div>';
+    } else {
+      const steps = [
+        ["Contacts", o.contacts, "people found and verified at target employers"],
+        ["Notes sent", o.sent, "outreach actually sent and logged"],
+        ["Answered", o.answered, "replied, declined or confirmed"],
+        ["Referrals confirmed", o.confirmed, "someone agreed to refer or introduce"],
+      ];
+      const max = Math.max(1, o.contacts);
+      html += '<div style="display:flex;flex-direction:column;gap:8px">' + steps.map(([lab, v, tip]) => {
+        const w = Math.max(v > 0 ? 2 : 0.4, (v / max) * 100);
+        const col = v > 0 ? "#34d399" : "#3a4150";
+        return '<div title="' + tip + '">' +
+          '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">' +
+          '<span style="color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600">' + lab + '</span>' +
+          '<strong>' + v + '</strong></div>' +
+          '<div style="background:#20242e;border-radius:4px;height:10px;overflow:hidden">' +
+          '<div style="width:' + w + '%;height:100%;background:' + col + '"></div></div></div>';
+      }).join("") + '</div>';
+
+      if (o.sent === 0 && o.contacts > 0) {
+        html += '<div style="margin-top:12px;padding:10px 12px;border-left:3px solid #fbbf24;background:#20242e;font-size:13px;line-height:1.5">' +
+          '<strong>' + o.contacts + ' contacts, 0 notes sent.</strong> Nothing here can be judged yet — ' +
+          'not the drafts, not the targeting, not whether referrals beat cold applications. ' +
+          'The first logged send is what turns this panel on.</div>';
+      } else if (o.sent > 0) {
+        html += '<div style="margin-top:12px;font-size:13px;color:var(--muted)">Answer rate ' +
+          (o.answer_rate_pct != null ? o.answer_rate_pct + "%" : "—") + ' of sent' +
+          (o.sent < 10 ? ' — too few to read as a rate; treat as a log.' : '.') + '</div>';
+      }
+
+      const owners = Object.entries(o.by_owner || {}).sort((a, b) => b[1] - a[1]);
+      if (owners.length) {
+        html += '<div style="margin-top:14px;font-size:12px;color:var(--muted)">Owned by: ' +
+          owners.map(([k, v]) => '<strong style="color:var(--fg)">' + v + '</strong> ' + k).join(" · ") + '</div>';
+      }
+    }
+
+    // Referred vs cold, on applications that actually went out.
+    if (rc) {
+      html += '<div style="margin-top:18px;border-top:1px solid #2a2f3a;padding-top:14px">';
+      html += '<div style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;margin-bottom:8px">Referred vs cold — applications sent</div>';
+      if (!rc.any_referrals) {
+        html += '<div style="font-size:13px;line-height:1.5;color:var(--muted)">No application has ever been marked <code>Referred!</code>. ' +
+          'The cold baseline is <strong style="color:var(--fg)">' + rc.cold.n + '</strong> sent, ' +
+          '<strong style="color:var(--fg)">' + (rc.cold.response_pct ?? "—") + '%</strong> responded, ' +
+          '<strong style="color:var(--fg)">' + (rc.cold.progressed_pct ?? "—") + '%</strong> past the first stage. ' +
+          'That is the number a referral has to beat.</div>';
+      } else {
+        html += '<table style="width:100%;font-size:13px;border-collapse:collapse">' +
+          '<tr style="color:var(--muted);text-align:left"><th style="padding:4px 0">Channel</th><th>Sent</th><th>Responded</th><th>Past stage 1</th></tr>' +
+          [["Referred", rc.referred], ["Cold", rc.cold]].map(([lab, d]) =>
+            '<tr><td style="padding:4px 0"><strong>' + lab + '</strong></td><td>' + d.n + '</td><td>' +
+            (d.response_pct != null ? d.response_pct + "%" : "—") + '</td><td>' +
+            (d.progressed_pct != null ? d.progressed_pct + "%" : "—") + '</td></tr>').join("") +
+          '</table>';
+      }
+      html += '</div>';
+    }
+    $("referral").innerHTML = html;
+  })();
 
   // Stages bar
   const total = summary.total_rows || 1;
