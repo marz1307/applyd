@@ -2,6 +2,8 @@
 
 A step-by-step walkthrough from "I have nothing installed" to "I just clicked Submit on a tailored application." If you're skimming, the [README](README.md) gives the 90-second pitch. This file is the full operating manual.
 
+**Terminology reference**: [`docs/GLOSSARY.md`](docs/GLOSSARY.md) defines every term you will see in the Notion tracker, in mode output, and in this manual — Stages, Match-score bands, Outreach states, Referral flags, funnel classifiers, ROUTINE_CONTRACT lines. Skim it once before your first application session and it will remove ~80% of "what does this mean?" friction.
+
 ---
 
 ## Table of contents

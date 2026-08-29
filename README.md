@@ -149,11 +149,15 @@ Everything past Stage 4 (assessment, phone screen, tech, onsite, offer) is track
 | Portal scanner | [`templates/portals.example.yml`](templates/portals.example.yml), [`scripts/scan/scan.mjs`](scripts/scan/scan.mjs) | LinkedIn, Indeed, Glassdoor, Greenhouse, Ashby, Lever, Workable, Welcome to the Jungle, Handshake, Reed UK |
 | Per-JD evaluation | [`modes/oferta.md`](modes/oferta.md) | A–G blocks, comp research, tracker write |
 | PDF generation | [`modes/pdf.md`](modes/pdf.md), [`scripts/cv/generate-pdf.mjs`](scripts/cv/generate-pdf.mjs) | A4 always, role-tailored variants |
-| Metrics semantic layer | [`scripts/metrics/metrics-core.mjs`](scripts/metrics/metrics-core.mjs) | One definition of applied, responded, screened, ghosted, plus Match-score band calibration; shared by every metric consumer |
+| Metrics semantic layer | [`scripts/metrics/metrics-core.mjs`](scripts/metrics/metrics-core.mjs) | One definition of applied, responded, screened, ghosted, referred; Match-score band calibration; shared by every metric consumer |
 | Interview prep | `interview-prep/` (created on first run) | STAR+R stories, company intel, JD-tailored prep |
 | Notion contract | [`modes/notion-tracker.md`](modes/notion-tracker.md) | DB schema, stage transitions, field map |
+| Referral system | [`modes/referral.md`](modes/referral.md) + [`modes/chase.md`](modes/chase.md) + [`scripts/outreach.mjs`](scripts/outreach.mjs) | Stage-3 named-human sourcing, Stage-4+ chase, and the six-state Outreach writer (the ONLY writer that can move `Outreach status` past `Not contacted`). Never sends. |
+| Email response-tracker | [`scripts/email/`](scripts/email) + [`scripts/email/README.md`](scripts/email/README.md) | Optional. Reads inbox READ-ONLY via a Gmail MCP; auto-files replies as Rejected / Responded on the matching Notion row. Enable via `EMAIL_LAYER=gmail` in `.env`. Never sends, never mutates the mailbox. |
 | Scheduled routines | [`routines/run-routine.ps1`](routines/run-routine.ps1), [`routines/adapters/`](routines/adapters) | Multi-CLI dispatch: `$env:CAREER_OPS_AGENT_CLI` selects `claude`, `codex`, or `gemini` adapter |
 | Batch worker | [`batch/batch-prompt.md`](batch/batch-prompt.md) | Self-contained prompt for headless agent-CLI parallel evaluations |
+| Port policy | [`docs/PORTING.md`](docs/PORTING.md) | The 7-rule contract for shipping changes from a personal fork back to this repo without leaking personal data |
+| Glossary | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | Every term you see in the Notion tracker + mode output — Stages, Match score bands, Outreach states, Referral flags, funnel classifiers, ROUTINE_CONTRACT lines |
 
 ---
 
@@ -181,6 +185,8 @@ In a Claude Code session (after onboarding), invoke via slash command:
 | `/applyd apply` | Interactive form-fill assistant |
 | `/applyd interview-prep <company>` | Build a tailored prep doc |
 | `/applyd contacto` | LinkedIn outreach drafts |
+| `/applyd referral` | Find named humans at Stage-3 companies (browser MCP + Notion; never sends) |
+| `/applyd chase` | Chase Stage-4+ silent applications through a named contact (never sends) |
 | `/applyd deep <company>` | Company research brief |
 | `/applyd tracker` | Status snapshot of your pipeline |
 | `/applyd patterns` | Rejection-pattern analysis |
