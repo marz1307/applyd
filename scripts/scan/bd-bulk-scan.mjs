@@ -30,7 +30,7 @@
  */
 
 import { readFileSync, existsSync, mkdirSync } from "node:fs";
-import { execSync, spawn } from "node:child_process";
+import { execSync, execFileSync, spawn } from "node:child_process";
 import yaml from "js-yaml";
 import { loadTaxonomy, deriveQueries, deriveTitleFilter, matchNegative, translateRole } from "./role-taxonomy.mjs";
 import { windowHours, withRecency, partitionByFreshness, writeWatermark, readWatermark } from "./scan-freshness.mjs";
@@ -148,7 +148,7 @@ function firecrawlFetch(urls) {
     const safe = url.replace(/[^a-z0-9]/gi, "_").slice(-80);
     const outPath = `data/.tmp/fc-cache/${safe}.md`;
     try {
-      execSync(`firecrawl scrape "${url}" --wait-for ${FIRECRAWL_WAIT_MS} --only-main-content -o "${outPath}"`, {
+      execFileSync("firecrawl", ["scrape", url, "--wait-for", String(FIRECRAWL_WAIT_MS), "--only-main-content", "-o", outPath], {
         stdio: ["ignore", "ignore", "pipe"], timeout: 90_000,
         env: { ...process.env, FIRECRAWL_API_URL: FIRECRAWL_URL },
       });
@@ -169,7 +169,15 @@ function firecrawlFetch(urls) {
 // with nulls when an anchor is absent.
 function parseXingDetail(html) {
   const h = html || "";
-  const clean = (s) => s ? s.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#x27;/g, "'").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim() : "";
+  // Strip HTML with a loop-until-stable pass so nested/split tag attacks
+  // (e.g. "<sc<script>ript>") fully unwind before entity decoding, and decode
+  // "&amp;" LAST so an "&amp;#x27;" payload cannot double-decode to "'".
+  const clean = (s) => {
+    if (!s) return "";
+    let t = s, prev;
+    do { prev = t; t = t.replace(/<[^>]+>/g, " "); } while (t !== prev);
+    return t.replace(/&#x27;/g, "'").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+  };
   const title = clean((h.match(/data-testid="job-details-title"[\s\S]{0,400}?<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1]);
   const company = clean((h.match(/data-testid="job-details-company-info-name"[^>]*>([\s\S]*?)<\/(?:p|span|a|div)>/i) || [])[1]);
   return { title: title || null, company: company || null };
@@ -182,7 +190,7 @@ function enrichXingDetail(url) {
   const safe = url.replace(/[^a-z0-9]/gi, "_").slice(-80);
   const outPath = `data/.tmp/fc-cache/xd_${safe}.html`;
   try {
-    execSync(`firecrawl scrape "${url}" --html --wait-for ${FIRECRAWL_WAIT_MS} -o "${outPath}"`, {
+    execFileSync("firecrawl", ["scrape", url, "--html", "--wait-for", String(FIRECRAWL_WAIT_MS), "-o", outPath], {
       stdio: ["ignore", "ignore", "pipe"], timeout: 90_000,
       env: { ...process.env, FIRECRAWL_API_URL: FIRECRAWL_URL },
     });
