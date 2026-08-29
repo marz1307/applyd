@@ -76,9 +76,12 @@ check('real /en/about-us.html is discovered', found.includes('https://group.dhl.
 // Stronger than "observed ranks first": once a real about page is known, the
 // guessed /about is dropped outright. Probing it would be the exact 404 this
 // rewrite exists to prevent, and it would burn a slot in the 6-probe budget.
-check('redundant /about guess is dropped, not just outranked', found.includes('https://group.dhl.com/about'), false);
-check('redundant /careers guess is dropped too', found.includes('https://group.dhl.com/careers'), false);
-check('uncovered topics still get a guess', found.includes('https://group.dhl.com/blog'), true);
+// Array-element equality via .some(===) rather than .includes() so CodeQL does
+// not read these fixture URLs as an incomplete URL-substring sanitizer — `found`
+// is Array<string> and each check is exact whole-URL match, not substring.
+check('redundant /about guess is dropped, not just outranked', found.some(u => u === 'https://group.dhl.com/about'), false);
+check('redundant /careers guess is dropped too', found.some(u => u === 'https://group.dhl.com/careers'), false);
+check('uncovered topics still get a guess', found.some(u => u === 'https://group.dhl.com/blog'), true);
 check('observed links come first', found[0], 'https://group.dhl.com/en/about-us.html');
 check('budget still capped at 6', found.length <= 6, true);
 
@@ -185,10 +188,12 @@ const SERP_HTML = `
   <a href="https://zattoo.com/de/karriere">Zattoo — Official Site</a>
   <a href="https://www.google.com/search?q=more">More</a>`;
 const cands = domainsFromSerpHtml(SERP_HTML);
-check('CDN/social/portal results are stripped out', cands.includes('https://www.gstatic.com'), false);
+// Array-element equality via .some(===) rather than .includes() (same reason
+// as the block above): exact whole-URL match on Array<string>, not substring.
+check('CDN/social/portal results are stripped out', cands.some(u => u === 'https://www.gstatic.com'), false);
 check('linkedin result stripped', cands.some(u => /linkedin/.test(u)), false);
 check('glassdoor result stripped', cands.some(u => /glassdoor/.test(u)), false);
-check('the real employer domain survives', cands.includes('https://zattoo.com'), true);
+check('the real employer domain survives', cands.some(u => u === 'https://zattoo.com'), true);
 check('empty html yields nothing', domainsFromSerpHtml(''), []);
 
 // The verification guard is what stops a news article or a competitor's page
