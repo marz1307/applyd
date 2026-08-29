@@ -139,15 +139,22 @@ function parseHtmlForCoherence(html, finalUrl, source) {
   // pages; Firecrawl is preferred for cleaner output.
   const title = (html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] || '').trim();
   const ogSite = (html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)["']/i)?.[1] || '').trim();
-  // Crude body extraction: strip tags from <body>...</body>.
+  // Crude body extraction: strip tags from <body>...</body>. Loop-until-stable
+  // so nested/split tag attacks like "<sc<script>ript>" and interleaved
+  // `<style<style>...</style>` fully unwind (js/bad-tag-filter,
+  // js/incomplete-multi-character-sanitization).
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-  const bodyText = bodyMatch
-    ? bodyMatch[1].replace(/<script[\s\S]*?<\/script>/gi, '')
-                  .replace(/<style[\s\S]*?<\/style>/gi, '')
-                  .replace(/<[^>]+>/g, ' ')
-                  .replace(/\s+/g, ' ')
-                  .trim()
-    : '';
+  let bodyText = '';
+  if (bodyMatch) {
+    let s = bodyMatch[1], prev;
+    do {
+      prev = s;
+      s = s.replace(/<script[\s\S]*?<\/script>/gi, '')
+           .replace(/<style[\s\S]*?<\/style>/gi, '')
+           .replace(/<[^>]+>/g, ' ');
+    } while (s !== prev);
+    bodyText = s.replace(/\s+/g, ' ').trim();
+  }
   const dead = /(this job is no longer available|page not found|404|access denied|expired|filled position)/i;
   const isAlive = bodyText.length >= 500 && !dead.test(bodyText.slice(0, 2000));
   return { finalUrl, title, company: ogSite, body: bodyText.slice(0, 5000), isAlive, source };

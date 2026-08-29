@@ -146,9 +146,18 @@ function main() {
         // body too, not only the letter. Same rule as CL_EM_DASH.
         // extractVisibleText not available here — scan the rendered text only
         // by stripping tags first so a CSS `content: "—"` wouldn't false-fire.
-        const visible = html.replace(/<script[\s\S]*?<\/script>/gi, '')
-          .replace(/<style[\s\S]*?<\/style>/gi, '')
-          .replace(/<[^>]+>/g, ' ');
+        // Loop-until-stable strip so nested/split tag attacks like
+        // "<sc<script>ript>" fully unwind (js/bad-tag-filter,
+        // js/incomplete-multi-character-sanitization).
+        let visible = html;
+        let _prev;
+        do {
+          _prev = visible;
+          visible = visible
+            .replace(/<script[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[\s\S]*?<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ');
+        } while (visible !== _prev);
         if (/—/.test(visible)) {
           const idx = visible.search(/—/);
           const ctx = visible.slice(Math.max(0, idx - 30), Math.min(visible.length, idx + 30)).replace(/\s+/g, ' ').trim();

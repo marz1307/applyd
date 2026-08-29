@@ -208,8 +208,12 @@ function runReadabilityGates({ appId, company, letterPath }) {
       ...(res.pass ? [] : res.failures.map(f => `  - ${f.code}: ${f.detail}`)),
       ` letter_gates_metrics: ${JSON.stringify(res.metrics)}`,
     ].join('\n');
+    // Match both "-->" and the legacy "--!>" HTML comment terminators so a
+    // pre-existing audit block written with either variant still gets its
+    // stamp inserted before the close, not appended after it
+    // (js/bad-tag-filter).
     fs.writeFileSync(letterPath, md.includes('<!--')
-      ? md.replace(/-->\s*$/, `${stamp}\n-->\n`)
+      ? md.replace(/--!?>\s*$/, `${stamp}\n-->\n`)
       : `${md}\n<!--\n${stamp}\n-->\n`);
   } catch (e) {
     console.error(`  [gates] could not stamp audit block: ${String(e.message).slice(0, 80)}`);

@@ -244,11 +244,19 @@ function assertNoAspirationalLanguage(html, label = 'CV') {
 }
 
 function extractVisibleText(html) {
-  return String(html || '')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ');
+  // Loop-until-stable strip so nested/split tag attacks like "<sc<script>ript>"
+  // fully unwind (js/bad-tag-filter, js/incomplete-multi-character-sanitization).
+  let out = String(html || '');
+  let prev;
+  do {
+    prev = out;
+    out = out
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ');
+  } while (out !== prev);
+  return out;
 }
 
 // ---- banned-content guard -----------------------------------------------
