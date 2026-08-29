@@ -1,5 +1,14 @@
 # run-routine.ps1
 #
+# ASCII-ONLY STRING DISCIPLINE: keep this file free of em dashes (U+2014)
+# and other non-ASCII bytes inside double-quoted "..." strings. Windows
+# PowerShell 5.1 mis-parses the UTF-8 bytes of an em dash as a string
+# terminator, which turns a valid file into three cryptic "Unexpected
+# token" / "Missing statement block" errors far away from the real site.
+# Use plain "-" (or "--") in strings. Comments are safe but keep them
+# uniform anyway so a future refactor cannot silently move an em dash
+# from a comment into a string.
+#
 # Wrapper invoked by Windows Task Scheduler to run a applyd routine
 # under a headless agent CLI and capture its output to data/routine-logs/.
 #
@@ -10,12 +19,12 @@
 #     the wrapper keeps log-capture, contract validation, retries,
 #     dashboard rebuild, and Windows Task Scheduler integration.
 #   - claude.ps1 is the reference adapter. codex.ps1 and gemini.ps1
-#     ship as best-effort stubs — verify locally before scheduling.
+#     ship as best-effort stubs - verify locally before scheduling.
 #
 # Hardened wrapper (post-2026-05-25 critique):
 #   - Per-routine MCP allowlists (least privilege; M4)
 #   - Hard wall-clock timeout per routine (C2; kills runaway CLI)
-#   - Output-contract validation — CLI exit code is NOT trusted; log
+#   - Output-contract validation - CLI exit code is NOT trusted; log
 #     MUST contain a `--- ROUTINE_CONTRACT ---` block or wrapper exits 4 (C1)
 #   - BRIGHTDATA_API_KEY preflight for routines that need it (H4)
 #   - Wrapper-trace lives outside the gitignored data/routine-logs/ so the
@@ -26,8 +35,8 @@
 #
 # Routine names (must match a file under routines/<name>.md):
 #   - morning-scan     (07:00, scan.mjs against ATS APIs)
-#   - lunchtime-scan   (12:30, Bright Data SERP — requires BRIGHTDATA_API_KEY)
-#   - bd-bulk-scan     (05:55/13:00, Bright Data Dataset Scraper — requires BRIGHTDATA_DATASET_TOKEN)
+#   - lunchtime-scan   (12:30, Bright Data SERP - requires BRIGHTDATA_API_KEY)
+#   - bd-bulk-scan     (05:55/13:00, Bright Data Dataset Scraper - requires BRIGHTDATA_DATASET_TOKEN)
 #   - pace-check       (17:00, pace-alarm.mjs)
 #   - auto-eval        (21:00, oferta evaluation for Stage 1 → 2)
 #   - auto-draft       (21:30, CV PDF + cover letter for Stage 2 → 3)
@@ -74,7 +83,7 @@ try {
 # ── Per-routine policy ──────────────────────────────────────────────
 # Each routine declares: allowed tools (least-privilege), required env
 # vars (preflight), and a wall-clock timeout. morning-scan and pace-check
-# do NOT get Bright Data — only lunchtime-scan needs it.
+# do NOT get Bright Data - only lunchtime-scan needs it.
 $policy = @{
     # MODEL TIER (2026-07-06): the mechanical routines below (run a deterministic
     # node script, dedup/count rows, post at most one Notion comment, emit a
@@ -86,19 +95,19 @@ $policy = @{
         AllowedTools = "Bash,Read,Write,Edit,Glob,Grep,mcp__claude_ai_Notion__*,mcp__notion__*"
         RequiredEnv  = @()
         Model        = "sonnet"
-        TimeoutSec   = 1200  # 20 min — scanner hits 30 portals
+        TimeoutSec   = 1200  # 20 min - scanner hits 30 portals
     }
     "lunchtime-scan" = @{
         AllowedTools = "Bash,Read,Write,Edit,Glob,Grep,mcp__claude_ai_Notion__*,mcp__notion__*,mcp__brightdata__*"
         RequiredEnv  = @("BRIGHTDATA_API_KEY")
         Model        = "sonnet"
-        TimeoutSec   = 1800  # 30 min — Bright Data scrapes are slower
+        TimeoutSec   = 1800  # 30 min - Bright Data scrapes are slower
     }
     "pace-check"     = @{
         AllowedTools = "Bash,Read,Write,Edit,Glob,Grep,mcp__claude_ai_Notion__*,mcp__notion__*"
         RequiredEnv  = @()
         Model        = "sonnet"
-        TimeoutSec   = 300   # 5 min — single script + one Notion comment
+        TimeoutSec   = 300   # 5 min - single script + one Notion comment
     }
     "auto-eval"      = @{
         # Eval needs: full queue enumeration via notion-query.mjs (NOTION_TOKEN),
@@ -106,7 +115,7 @@ $policy = @{
         # Notion writes for Match score / Stage transition.
         AllowedTools = "Bash,Read,Write,Edit,Glob,Grep,WebFetch,mcp__claude_ai_Notion__*,mcp__notion__*,mcp__brightdata__*"
         RequiredEnv  = @("NOTION_TOKEN")
-        TimeoutSec   = 3600  # 60 min — up to 50 evaluations × ~40-60s each
+        TimeoutSec   = 3600  # 60 min - up to 50 evaluations × ~40-60s each
     }
     "auto-draft"     = @{
         # Draft needs: queue enumeration (NOTION_TOKEN), resume-writer/
@@ -114,7 +123,7 @@ $policy = @{
         # Notion writes for Stage transition. No web fetching needed.
         AllowedTools = "Bash,Read,Write,Edit,Glob,Grep,mcp__claude_ai_Notion__*,mcp__notion__*"
         RequiredEnv  = @("NOTION_TOKEN")
-        TimeoutSec   = 3600  # 60 min — PDF gen + LLM CL drafting × up to 20 rows
+        TimeoutSec   = 3600  # 60 min - PDF gen + LLM CL drafting × up to 20 rows
     }
     "auto-interview-prep" = @{
         # Generates the 6-doc interview prep pack for Stage 4+ rows.
@@ -122,14 +131,14 @@ $policy = @{
         # for blocked domains. Notion upload via notion-upload-file.mjs.
         AllowedTools = "Bash,Read,Write,Edit,Glob,Grep,WebFetch,mcp__claude_ai_Notion__*,mcp__notion__*,mcp__brightdata__*"
         RequiredEnv  = @("NOTION_TOKEN")
-        TimeoutSec   = 3600  # 60 min — up to 10 packs × ~5 min each (LLM-heavy)
+        TimeoutSec   = 3600  # 60 min - up to 10 packs × ~5 min each (LLM-heavy)
     }
     "system-eval" = @{
         # Read-only observability + debugging. Hits Notion only
         # (no credits, no writes). No external apps.
         AllowedTools = "Bash,Read,Grep,Glob"
         RequiredEnv  = @("NOTION_TOKEN")
-        TimeoutSec   = 300  # 5 min — deep mode ~90s; quick mode <5s
+        TimeoutSec   = 300  # 5 min - deep mode ~90s; quick mode <5s
     }
     "bd-bulk-scan" = @{
         # Bright Data bulk pull. Sole high-volume engine post-Apify-retirement
@@ -141,7 +150,7 @@ $policy = @{
         # PURE-SCRIPT routine (2026-05-28): the .mjs is deterministic and
         # prints its own ROUTINE_CONTRACT block, so we bypass `claude -p`
         # to avoid the LLM paraphrasing the contract and tripping
-        # validation. Script is invoked directly via `node` — no MCP, no
+        # validation. Script is invoked directly via `node` - no MCP, no
         # AllowedTools needed.
         Script       = "scripts/scan/bd-bulk-scan.mjs"
         AllowedTools = ""
@@ -159,17 +168,17 @@ $policy = @{
         # Affiliation-first referral scouting. PURE SCRIPT (2026-07-07): the
         # writer self-provisions the Stage-3 queue (via notion-query.mjs), then
         # classifies + writes warm-path plans back to Notion and prints its own
-        # ROUTINE_CONTRACT — so we bypass `claude -p` and are immune to the
+        # ROUTINE_CONTRACT - so we bypass `claude -p` and are immune to the
         # headless OAuth 401 that empties the LLM routines' logs. Only needs
         # NOTION_TOKEN. NO browsing, NO Bright Data, NO LLM. The 2nd-degree
         # logged-in-LinkedIn pull stays Cowork-only (contacto.md).
         Script       = "scripts/scan/referral-scout-run.mjs"
         AllowedTools = ""
         RequiredEnv  = @("NOTION_TOKEN")
-        TimeoutSec   = 900   # 15 min — up to 20 rows × Notion write
+        TimeoutSec   = 900   # 15 min - up to 20 rows × Notion write
     }
     "bd-referral-scout" = @{
-        # Layer 3: Bright Data cold PUBLIC-profile discovery. PURE SCRIPT —
+        # Layer 3: Bright Data cold PUBLIC-profile discovery. PURE SCRIPT -
         # prints its own ROUTINE_CONTRACT, so no claude -p / AllowedTools.
         # Public data only; writes LEADS (Outreach status = Not contacted);
         # never messages, never logs into LinkedIn. Config-gated + cost-capped.
@@ -180,7 +189,7 @@ $policy = @{
     }
 }
 
-# Retry policy per routine — applied if first pass fails validation.
+# Retry policy per routine - applied if first pass fails validation.
 # SESSION_LIMIT is never retried (waiting won't help within the wrapper's
 # wall-clock). Paid routines (bd-bulk-scan, LLM-heavy auto-draft) get
 # 1 retry max so failures don't double-bill. Cheap idempotent routines
@@ -195,7 +204,7 @@ $retryPolicy = @{
     "auto-interview-prep" = @{ Max = 2; BackoffSec = 90 }
     "referral-scout"      = @{ Max = 2; BackoffSec = 60 }   # cheap + idempotent (sentinel-guarded)
     "bd-referral-scout"   = @{ Max = 1; BackoffSec = 90 }   # paid per-SERP; 1 retry max
-    "system-eval"         = @{ Max = 0; BackoffSec = 0  }   # never retry — observability fails loud
+    "system-eval"         = @{ Max = 0; BackoffSec = 0  }   # never retry - observability fails loud
 }
 $maxRetries  = $retryPolicy[$Routine].Max
 $backoffSec  = $retryPolicy[$Routine].BackoffSec
@@ -227,7 +236,7 @@ if ($isPureScript) {
 }
 if (-not (Test-Path $logDir))     { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 
-# Required env-var check (H4) — fail closed if a secret is missing.
+# Required env-var check (H4) - fail closed if a secret is missing.
 # IMPORTANT: PowerShell's child processes (cmd.exe → claude.exe) inherit
 # the wrapper's PROCESS-scope env block, NOT the User-scope registry. If
 # this PowerShell session was launched in a way that didn't pre-populate
@@ -271,20 +280,20 @@ function Test-IsCrashExit($exitCode) {
 
 function Get-FailureMode($content, $exitCode, $timedOut, $contractValid) {
     # Classify why a pass failed so we can decide retry vs skip.
-    # A hard crash outranks every log-text signal — see Test-IsCrashExit.
+    # A hard crash outranks every log-text signal - see Test-IsCrashExit.
     if ($timedOut)                                  { return "TIMEOUT" }
     if (Test-IsCrashExit $exitCode)                 { return "CRASH" }
     # Quota strings are only trusted when the run did NOT produce output.
     # $content is the WHOLE log, which includes the routine's own
     # --- ROUTINE_CONTRACT --- block. A routine that NARRATES a quota event
     # ("...then the session limit AFTER building artifacts but BEFORE
-    # uploading") would otherwise be classified as having hit one — exit 0,
+    # uploading") would otherwise be classified as having hit one - exit 0,
     # CONTRACT_VALID True, work landed, and yet FAILURE_MODE reads
     # SESSION_LIMIT. Machine fact (exit code + contract) wins over string
     # match.
     $producedOutput = $contractValid -and $exitCode -eq 0
     if (-not $producedOutput) {
-        # "rate limit" is deliberately excluded — that one IS transient and
+        # "rate limit" is deliberately excluded - that one IS transient and
         # should keep its retries.
         if ($content -match "weekly limit")                             { return "WEEKLY_LIMIT" }
         if ($content -match "session limit|usage limit|5-hour limit")   { return "SESSION_LIMIT" }
@@ -300,13 +309,13 @@ function Get-FailureMode($content, $exitCode, $timedOut, $contractValid) {
 }
 
 function Should-Retry($mode) {
-    # Quota limits are external — retrying within the wrapper window won't
+    # Quota limits are external - retrying within the wrapper window won't
     # help (quota resets on a fixed schedule, not on demand).
     if ($mode -eq "SESSION_LIMIT") { return $false }
     if ($mode -eq "WEEKLY_LIMIT")  { return $false }
     if ($mode -eq "OK")            { return $false }
     # CRASH is deliberately non-retriable. Observed crashes fire during
-    # teardown, AFTER the routine emitted its contract — meaning the work
+    # teardown, AFTER the routine emitted its contract - meaning the work
     # (scrape, Notion writes) already landed. Retrying would duplicate side
     # effects to buy nothing, since the fault is deterministic. Alert
     # instead, and let a human read the log.
@@ -318,11 +327,11 @@ function Test-NeedsManualAttention($routine, $mode) {
     # Notify ONLY when wrapper has exhausted automatic recovery options.
     # Rules:
     #   - SESSION_LIMIT: only manual when the routine won't fire again
-    #     today (i.e. compressed Tue/Wed/Thu morning — one shot). On
+    #     today (i.e. compressed Tue/Wed/Thu morning - one shot). On
     #     normal weekdays, AutoDraft re-fires next night at 21:30 so the
     #     wrapper stays silent and lets the schedule retry organically.
     #   - WEEKLY_LIMIT / CRASH / TIMEOUT / EMPTY_LOG / RUNTIME_ERROR /
-    #     NO_CONTRACT: always manual once retries are exhausted — these
+    #     NO_CONTRACT: always manual once retries are exhausted - these
     #     don't auto-recover. A weekly quota outlasts every fire on the
     #     schedule; a CRASH is a deterministic native fault that repeats on
     #     every fire until the code is fixed.
@@ -366,14 +375,14 @@ function Write-Alert($routine, $mode, $exitCode, $logPath, $attempts, $finalStat
             }
             "WEEKLY_LIMIT" {
                 # Unlike SESSION_LIMIT this outlasts every fire on the schedule, so it
-                # can never be left to recover organically — always manual.
+                # can never be left to recover organically - always manual.
                 "Hit weekly quota. Cannot auto-recover within this week's schedule. Check provider account or wait for weekly reset before re-running."
             }
             "CRASH" {
                 # Native fault at process teardown, AFTER the routine emitted its
-                # contract — retrying would duplicate side effects to buy nothing,
+                # contract - retrying would duplicate side effects to buy nothing,
                 # since the fault is deterministic. Human reads the log.
-                "Routine crashed at teardown (native fault). The work likely landed before the crash — inspect log tail before re-running to avoid duplicate side effects."
+                "Routine crashed at teardown (native fault). The work likely landed before the crash - inspect log tail before re-running to avoid duplicate side effects."
             }
             "TIMEOUT"       { "Routine exceeded $timeoutSec sec. Investigate: hung agent CLI? Stuck MCP? Re-run manually with --verbose." }
             "EMPTY_LOG"     { "Routine produced no stdout (agent CLI missing MCP or pure-script node failure). Check trace + re-run manually." }
@@ -385,7 +394,7 @@ function Write-Alert($routine, $mode, $exitCode, $logPath, $attempts, $finalStat
     }
     $payload | ConvertTo-Json -Depth 6 | Out-File -FilePath $alertFile -Encoding UTF8
 
-    # Windows toast — ONLY when manual attention required
+    # Windows toast - ONLY when manual attention required
     if ($needsAttention) {
         try {
             $title = "applyd: $routine needs you"
@@ -399,7 +408,7 @@ function Write-Alert($routine, $mode, $exitCode, $logPath, $attempts, $finalStat
             $bal.Dispose()
         } catch {}
     } else {
-        # Silent — alert still written for SystemEval to surface later, but
+        # Silent - alert still written for SystemEval to surface later, but
         # no toast to interrupt the user during normal auto-recovery cycles.
         "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`tSILENT_ALERT routine=$routine mode=$mode (auto-recovers)" |
             Out-File -FilePath $tracePath -Append -Encoding UTF8
@@ -436,7 +445,7 @@ $header | Out-File -FilePath $logPath -Encoding UTF8
 # when the inner command itself contains quoted paths.
 #
 # Two launch paths:
-#   1. Pure-script routines invoke `node <script>` directly — no LLM,
+#   1. Pure-script routines invoke `node <script>` directly - no LLM,
 #      no MCP, no adapter. Deterministic; script owns its ROUTINE_CONTRACT.
 #   2. Prompt routines dispatch to the agent-CLI adapter selected by
 #      $env:CAREER_OPS_AGENT_CLI (default: claude). The adapter owns
@@ -488,7 +497,7 @@ $totalAttempts = $maxRetries + 1
     $psi.FileName         = "cmd.exe"
     $psi.Arguments        = $cmdArgs
     $psi.WorkingDirectory = $repoRoot   # Set-Location only updates PS's location,
-                                        # not the .NET process cwd — child claude
+                                        # not the .NET process cwd - child claude
                                         # would otherwise inherit Task Scheduler's
                                         # C:\Windows\system32 default and abort
                                         # on the "not in repo root" pre-flight.
@@ -501,7 +510,7 @@ $totalAttempts = $maxRetries + 1
     # timer is the only one).
     $outerTimeoutMs = ($timeoutSec + 30) * 1000
     if (-not $proc.WaitForExit($outerTimeoutMs)) {
-        # Timeout — kill the process tree and mark timeout.
+        # Timeout - kill the process tree and mark timeout.
         $timedOut = $true
         try { taskkill /PID $proc.Id /T /F | Out-Null } catch {}
         try { $proc.WaitForExit(2000) | Out-Null } catch {}
@@ -625,7 +634,7 @@ if ($Routine -eq "auto-draft") {
 # the local dashboard (served on :7300) always reflects the latest
 # Notion state. Skipped for system-eval (it doesn't mutate Notion, so
 # nothing to refresh). 30s soft cap so a Notion outage can't block
-# the wrapper's exit. Skipped inside a drain loop ($SkipDashboard) — the
+# the wrapper's exit. Skipped inside a drain loop ($SkipDashboard) - the
 # drain driver rebuilds + publishes once at the end instead of per iteration.
 if ($Routine -ne "system-eval" -and -not $SkipDashboard) {
     try {
