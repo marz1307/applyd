@@ -26,6 +26,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { stripHtml } from '../text-safety.cjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..');
@@ -114,24 +115,6 @@ const PROFILE_PATH = existsSync(resolve(REPO_ROOT, 'modes', '_profile.md'))
 if (!existsSync(PROFILE_PATH)) {
   console.error(`modes/_profile.md (or _shared.md) not found — run onboarding first`);
   process.exit(1);
-}
-
-function stripHtml(html) {
-  let out = '', inTag = false, skip = false;
-  const lc = html.toLowerCase();
-  for (let i = 0; i < html.length; i++) {
-    if (!skip && lc.startsWith('<style', i)) skip = true;
-    if (!skip && lc.startsWith('<script', i)) skip = true;
-    if (skip && lc.startsWith('</style>', i)) { skip = false; i += 7; continue; }
-    if (skip && lc.startsWith('</script>', i)) { skip = false; i += 8; continue; }
-    if (skip) continue;
-    if (html[i] === '<') { inTag = true; out += ' '; continue; }
-    if (html[i] === '>') { inTag = false; continue; }
-    if (!inTag) out += html[i];
-  }
-  const entities = { '&nbsp;': ' ', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&amp;': '&' };
-  out = out.replace(/&(?:nbsp|lt|gt|quot|#39|amp);/g, m => entities[m] || m);
-  return out.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 const profileMd = readFileSync(PROFILE_PATH, 'utf8');

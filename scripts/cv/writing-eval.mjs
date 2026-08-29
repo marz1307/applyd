@@ -31,6 +31,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripHtml } from '../text-safety.cjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CV_DIR = join(ROOT, 'output', 'cv-drafts');
@@ -143,21 +144,10 @@ function main() {
           if (!re.test(html)) add(r.application_id, 'CV_HALFGEN', `missing section ~/${sec}/ in ${base}`);
         }
         // Em dashes (—, U+2014) read as AI-generated and are banned in the CV
-        // body too, not only the letter. Same rule as CL_EM_DASH.
-        // extractVisibleText not available here — scan the rendered text only
-        // by stripping tags first so a CSS `content: "—"` wouldn't false-fire.
-        // Loop-until-stable strip so nested/split tag attacks like
-        // "<sc<script>ript>" fully unwind (js/bad-tag-filter,
-        // js/incomplete-multi-character-sanitization).
-        let visible = html;
-        let _prev;
-        do {
-          _prev = visible;
-          visible = visible
-            .replace(/<script[\s\S]*?<\/script>/gi, '')
-            .replace(/<style[\s\S]*?<\/style>/gi, '')
-            .replace(/<[^>]+>/g, ' ');
-        } while (visible !== _prev);
+        // body too, not only the letter. Same rule as CL_EM_DASH. Strip tags
+        // first via the shared state-machine parser (scripts/text-safety.cjs)
+        // so a CSS `content: "—"` wouldn't false-fire.
+        const visible = stripHtml(html);
         if (/—/.test(visible)) {
           const idx = visible.search(/—/);
           const ctx = visible.slice(Math.max(0, idx - 30), Math.min(visible.length, idx + 30)).replace(/\s+/g, ' ').trim();
