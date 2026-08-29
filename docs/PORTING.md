@@ -90,7 +90,11 @@ A single port session, from the fork to the public remote:
 
 ## The leak grep
 
-Run this after any port session, on the staging clone, before pushing. Fill in the placeholders with your fork's real identifiers — this file's public copy names none of them:
+Run this after any port session, on the staging clone, before pushing. Three passes — an identifier grep for named-person data, a **structural grep** for the classes of leak that hide in test fixtures and comments, and a **full-repo grep** (not just `git diff`) because leaks carry through unchanged file copies.
+
+### Pass 1 — identifier grep
+
+Fill in the placeholders with your fork's real identifiers — this file's public copy names none of them:
 
 ```bash
 # Personal-name / identifier grep. Every fork extends this list with:
@@ -101,6 +105,10 @@ Run this after any port session, on the staging clone, before pushing. Fill in t
 #   * Any personal e-mail domain (@<theirs>.com), never a work address
 #   * The fork's Notion database UUIDs (both applications and referral DBs)
 #   * The fork's Task Scheduler task-name prefix (typically the maintainer's initials)
+#   * Every employer / person named in the fork's HANDOFF chain (session notes
+#     accumulate real names as they document real incidents — always grep
+#     against the last ~10 session-note files, not just the standing quarantine
+#     list)
 PATTERNS=(
   "<personal-first-name>" "<personal-last-name>"
   "<git-handle>" "<linkedin-slug>"
@@ -116,13 +124,65 @@ for p in "${PATTERNS[@]}"; do
 done
 ```
 
+### Pass 2 — structural grep (catches what Pass 1 misses)
+
+This exists because a 2026-08-29 leak sweep found 22 references the identifier grep had missed. Every one was in a test fixture, a comment, or a docstring — grep had nothing to match because the operator's name wasn't in it. The leak was a **structural pattern**:
+
+- **`APP-####` references** in code comments and self-tests. The fork's own Notion application IDs (from a `data/applications.md` ledger) traceable back to specific rows. Test fixtures use them as "we observed this bug on X" callouts.
+- **Real employer names inside self-test fixtures.** Even known-public companies (Fortune 500 logistics, DAX-listed reinsurers, etc.) tie a test to a specific application-history incident.
+- **URL patterns derived from real employer sites** (`careers.<employer>.com/en/job/…`, `<employer>consulting.avature.net`, `group.<employer>.com`) — used as functional test inputs for scanners / resolvers.
+- **DACH-market brand names in classifier regexes** that correlate with the fork's target market — even without the operator's name attached.
+
+```bash
+# Pass 2: structural leak grep. No placeholders — these patterns work on any fork.
+
+# a) APP-#### references anywhere. Every real fork ID is a blocker unless it
+#    matches an obviously-generic placeholder (APP-XXXX, APP-1000..1003,
+#    APP-1234, APP-2000, APP-9000 are the conventions in the public repo).
+git grep -nE '\bAPP-[0-9]{3,5}\b' -- '*.mjs' '*.js' '*.cjs' '*.md' '*.ps1' 2>/dev/null \
+  | grep -viE 'APP-XXXX|APP-1000\b|APP-1001\b|APP-1002\b|APP-1003\b|APP-1010|APP-101\b|APP-1234|APP-2000\b|APP-3000\b|APP-5678\b|APP-54\b|APP-999\b|APP-9000\b|APP-123\b'
+
+# b) Real-looking employer names inside self-tests. Grep every string that
+#    reads like `Employer GmbH` / `Employer AG` / `Employer Ltd` / `Employer plc`
+#    inside a *.test.mjs, *.test.js, or a self-test block. Every hit needs a
+#    generic-placeholder or an intentional-fixture justification.
+git grep -nE '[A-Z][A-Za-z]{2,15}\s+(GmbH|AG|SE|KG|Ltd|LLC|plc|Inc)' \
+  -- '*.test.mjs' '*.test.js' '*self-test*' 2>/dev/null
+
+# c) URLs that resolve to a real employer's careers or Impressum surface.
+#    A test fixture that ships with a real employer's URL ties it to that
+#    employer's site as a debug reference point.
+git grep -nE 'careers\.[a-z0-9-]+\.(com|de|co\.uk|eu)|group\.[a-z0-9-]+\.com|[a-z0-9-]+\.avature\.net' \
+  -- '*.test.mjs' '*.test.js' '*.mjs' '*.js' '*.cjs' 2>/dev/null \
+  | grep -viE 'example\.com|example\.de|exampleco\.'
+
+# d) Non-generic brand names in classifier regexes. This is the class that hides
+#    inside a functional pattern. Run the pattern alphabet against the fork's
+#    HANDOFF-known employers rather than a fixed list — the fixed list rots.
+```
+
+### Pass 3 — scope: `git diff` is NOT enough
+
+The 22 references above lived in files the port didn't touch this cycle — they came in with an earlier port cycle and rode through unchanged. `git diff <baseline>..HEAD` misses them.
+
+Run every pass on the **full working tree**, not the diff:
+
+```bash
+# Right — scans every tracked file:
+git grep -nE '<pattern>' -- '*.mjs' '*.js' '*.cjs' '*.md'
+
+# Wrong — misses everything a prior port already leaked:
+git diff <baseline>..HEAD | grep -E '<pattern>'
+```
+
 Every hit is a blocker until you can explain it:
 
 - It's inside a `README.md` legitimately crediting the upstream maintainer? OK.
-- It's inside an example CV shipped as `cv.example.md` alongside the gitignored real one? OK.
+- It's inside an example JSON shipped as `<file>.example.json` alongside the gitignored real one? OK.
+- It's a generic-placeholder token (`APP-XXXX`, `Example Corp`, `example.com`)? OK.
 - It's anywhere else? Blocker. Fix before pushing.
 
-`scripts/test-all.mjs` runs a stricter version of this grep as its **Personal data leak check** section — a fresh clone must never trip it.
+`scripts/test-all.mjs` runs a version of Pass 1 as its **Personal data leak check** section — a fresh clone must never trip it. Passes 2 and 3 are operator responsibility; wire them into your own pre-push checklist.
 
 ---
 
