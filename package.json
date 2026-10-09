@@ -56,7 +56,7 @@
   "author": "Marvis Osazuwa (https://github.com/marz1307)",
   "license": "MIT",
   "dependencies": {
-    "dotenv": "^17.0.0",
+    "dotenv": "^18.0.5",
     "js-yaml": "^4.1.1",
     "playwright": "^1.61.1"
   }
